@@ -160,7 +160,7 @@ router.get('/profile', verifyFirebaseToken, async (req, res) => {
     }
 });
 
-// Configure multer for file uploads
+// Configure multer for file uploads (disk storage for student files)
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         const uploadDir = path.join(__dirname, '../uploads');
@@ -177,6 +177,23 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
     storage: storage,
+    fileFilter: function (req, file, cb) {
+        const allowedTypes = ['.csv', '.xlsx', '.xls'];
+        const fileExt = path.extname(file.originalname).toLowerCase();
+        if (allowedTypes.includes(fileExt)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only CSV and Excel files are allowed'));
+        }
+    },
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB limit
+    }
+});
+
+// Configure multer for marks import (memory storage for processing)
+const marksUpload = multer({ 
+    storage: multer.memoryStorage(),
     fileFilter: function (req, file, cb) {
         const allowedTypes = ['.csv', '.xlsx', '.xls'];
         const fileExt = path.extname(file.originalname).toLowerCase();
@@ -639,6 +656,219 @@ router.delete('/remove-subject', verifyFirebaseToken, async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Failed to remove subject'
+        });
+    }
+});
+
+// Route to import marks in bulk for a subject
+router.post('/import-marks/:subjectId', verifyFirebaseToken, marksUpload.single('marksFile'), async (req, res) => {
+    try {
+        const { subjectId } = req.params;
+        const firebaseUid = req.firebaseUser.uid;
+        
+        console.log('📊 Importing marks for subject:', subjectId);
+        
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                error: 'No file uploaded'
+            });
+        }
+        
+        // Find the TeacherSubject document
+        const teacherSubject = await TeacherSubject.findOne({
+            _id: subjectId,
+            teacherId: firebaseUid,
+            status: 'active'
+        });
+        
+        if (!teacherSubject) {
+            return res.status(404).json({
+                success: false,
+                error: 'Subject not found or access denied'
+            });
+        }
+        
+        // Parse the uploaded file
+        const fileBuffer = req.file.buffer;
+        let marksData = [];
+        
+        if (req.file.mimetype === 'text/csv' || req.file.originalname.endsWith('.csv')) {
+            // Parse CSV
+            const csvText = fileBuffer.toString('utf8');
+            const lines = csvText.split('\n').filter(line => line.trim());
+            
+            // Skip header if present
+            const startIndex = lines[0].toLowerCase().includes('uucms') ? 1 : 0;
+            
+            for (let i = startIndex; i < lines.length; i++) {
+                const columns = lines[i].split(',').map(col => col.trim().replace(/"/g, ''));
+                
+                if (columns.length >= 6) {
+                    marksData.push({
+                        uucmsRegNo: columns[0],
+                        name: columns[1],
+                        test1: parseFloat(columns[2]) || null,
+                        activity1: parseFloat(columns[3]) || null,
+                        test2: parseFloat(columns[4]) || null,
+                        activity2: parseFloat(columns[5]) || null
+                    });
+                }
+            }
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: 'Only CSV files are supported for marks import'
+            });
+        }
+        
+        if (marksData.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No valid marks data found in file'
+            });
+        }
+        
+        // Process and update student marks
+        let updatedCount = 0;
+        let notFoundCount = 0;
+        
+        for (const markData of marksData) {
+            // Find student in the subject's student list
+            const studentIndex = teacherSubject.students.findIndex(
+                student => student.uucmsRegNo === markData.uucmsRegNo
+            );
+            
+            if (studentIndex !== -1) {
+                // Calculate scaled marks (Test marks / 2)
+                const scaledDown1 = markData.test1 ? Math.round(markData.test1 / 2) : null;
+                const scaledDown2 = markData.test2 ? Math.round(markData.test2 / 2) : null;
+                
+                // Calculate totals
+                const c1Total = (scaledDown1 || 0) + (markData.activity1 || 0);
+                const c2Total = (scaledDown2 || 0) + (markData.activity2 || 0);
+                const grandTotal = c1Total + c2Total;
+                
+                // Update student marks
+                teacherSubject.students[studentIndex].marks = {
+                    C1: {
+                        test1: markData.test1,
+                        scaledDown: scaledDown1,
+                        activity: markData.activity1,
+                        total: c1Total
+                    },
+                    C2: {
+                        test2: markData.test2,
+                        scaledDown: scaledDown2,
+                        activity: markData.activity2,
+                        total: c2Total
+                    },
+                    grandTotal: grandTotal
+                };
+                
+                updatedCount++;
+            } else {
+                notFoundCount++;
+                console.warn(`Student not found: ${markData.uucmsRegNo}`);
+            }
+        }
+        
+        // Save the updated TeacherSubject document
+        await teacherSubject.save();
+        
+        console.log(`✅ Marks imported: ${updatedCount} updated, ${notFoundCount} not found`);
+        
+        res.json({
+            success: true,
+            message: `Marks imported successfully! ${updatedCount} students updated.`,
+            data: {
+                updatedCount,
+                notFoundCount,
+                totalProcessed: marksData.length
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error importing marks:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to import marks'
+        });
+    }
+});
+
+// Route to generate report for any stream/semester/subject combination
+router.post('/generate-report', verifyFirebaseToken, async (req, res) => {
+    try {
+        const { streamId, semesterNumber, subjectId } = req.body;
+        const firebaseUid = req.firebaseUser.uid;
+        
+        console.log('📊 Generating report for:', { streamId, semesterNumber, subjectId });
+        
+        // Find all TeacherSubject documents for this stream/semester/subject combination
+        const teacherSubjects = await TeacherSubject.find({
+            streamId: streamId,
+            semesterNumber: semesterNumber,
+            subjectId: subjectId,
+            status: 'active'
+        }).populate('subjectId', 'name code')
+          .populate('streamId', 'name');
+        
+        if (teacherSubjects.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'No data found for the selected combination'
+            });
+        }
+        
+        // Collect all students from all teachers for this subject
+        let allStudents = [];
+        let subjectInfo = null;
+        
+        teacherSubjects.forEach(teacherSubject => {
+            if (!subjectInfo) {
+                subjectInfo = {
+                    subjectName: teacherSubject.subjectName,
+                    subjectCode: teacherSubject.subjectCode,
+                    streamName: teacherSubject.streamName,
+                    semesterNumber: teacherSubject.semesterNumber
+                };
+            }
+            
+            // Add students from this teacher
+            if (teacherSubject.students && teacherSubject.students.length > 0) {
+                allStudents = allStudents.concat(teacherSubject.students);
+            }
+        });
+        
+        // Remove duplicates based on UUCMS Reg No
+        const uniqueStudents = allStudents.filter((student, index, self) => 
+            index === self.findIndex(s => s.uucmsRegNo === student.uucmsRegNo)
+        );
+        
+        // Sort students by UUCMS Reg No
+        uniqueStudents.sort((a, b) => a.uucmsRegNo.localeCompare(b.uucmsRegNo));
+        
+        console.log(`✅ Report generated with ${uniqueStudents.length} unique students`);
+        
+        res.json({
+            success: true,
+            data: {
+                subjectName: subjectInfo.subjectName,
+                subjectCode: subjectInfo.subjectCode,
+                streamName: subjectInfo.streamName,
+                semesterNumber: subjectInfo.semesterNumber,
+                students: uniqueStudents,
+                totalStudents: uniqueStudents.length,
+                generatedAt: new Date().toISOString()
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error generating report:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to generate report'
         });
     }
 });

@@ -66,6 +66,11 @@ app.get('/subject-selection', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'subject-selection.html'));
 });
 
+// Serve report-generator page
+app.get('/report-generator', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'report-generator.html'));
+});
+
 app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });

@@ -253,6 +253,13 @@
                     window.location.href = '/subject-selection';
                 });
             }
+            
+            // Generate Report button
+            if (document.getElementById('generateReportBtn')) {
+                document.getElementById('generateReportBtn').addEventListener('click', () => {
+                    window.location.href = '/report-generator';
+                });
+            }
         }
         
         async function handleLogout() {
@@ -481,10 +488,16 @@
                     <h3 class="text-xl font-semibold text-gray-900">Your Classes</h3>
                     <p class="text-sm text-text-gray">Loaded from database</p>
                 </div>
-                <button id="addSubjectBtn" class="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition-colors">
-                    <i class="fas fa-plus mr-2"></i>
-                    Add More
-                </button>
+                <div class="flex items-center space-x-3">
+                    <button id="generateReportBtn" class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors">
+                        <i class="fas fa-chart-bar mr-2"></i>
+                        Generate Report
+                    </button>
+                    <button id="addSubjectBtn" class="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition-colors">
+                        <i class="fas fa-plus mr-2"></i>
+                        Add More
+                    </button>
+                </div>
             </div>
             
             <!-- Subjects Grid -->

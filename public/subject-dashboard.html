@@ -314,6 +314,9 @@
             
             // Search functionality
             document.getElementById('studentSearch').addEventListener('input', handleSearch);
+            
+            // Import Marks button
+            document.getElementById('importMarksBtn').addEventListener('click', showImportMarksModal);
         }
         
         async function handleFileUpload(e) {
@@ -416,6 +419,136 @@
                 if (filteredStudents.length === 0) {
                     showAlert('info', 'No students found matching your search.', 3000);
                 }
+            }
+        }
+        
+        function showImportMarksModal() {
+            // Create modal HTML
+            const modalHTML = `
+                <div id="importMarksModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                        <div class="text-center mb-6">
+                            <div class="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <i class="fas fa-upload text-orange-600 text-2xl"></i>
+                            </div>
+                            <h3 class="text-xl font-semibold text-gray-900 mb-2">Import Marks</h3>
+                            <p class="text-gray-600">Upload a CSV file with student marks</p>
+                        </div>
+                        
+                        <form id="importMarksForm" class="space-y-4">
+                            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-orange-500 transition-colors">
+                                <input type="file" id="marksFile" name="marksFile" accept=".csv,.xlsx,.xls" class="hidden">
+                                <label for="marksFile" class="cursor-pointer">
+                                    <div class="text-center">
+                                        <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-4"></i>
+                                        <p class="text-lg font-medium text-gray-900 mb-2">Choose marks file</p>
+                                        <p class="text-sm text-gray-600">CSV or Excel files only</p>
+                                        <div id="marksFileName" class="mt-2 text-sm text-orange-600 font-medium hidden"></div>
+                                    </div>
+                                </label>
+                            </div>
+                            
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <h4 class="font-semibold text-gray-900 mb-2">Required File Format:</h4>
+                                <ul class="text-sm text-gray-600 space-y-1">
+                                    <li>• Column 1: UUCMS Registration Number</li>
+                                    <li>• Column 2: Student Name</li>
+                                    <li>• Column 3: Test 1 Marks (C1)</li>
+                                    <li>• Column 4: Activity Marks (C1)</li>
+                                    <li>• Column 5: Test 2 Marks (C2)</li>
+                                    <li>• Column 6: Activity Marks (C2)</li>
+                                    <li class="text-orange-600 font-medium">• Scaled marks and totals will be calculated automatically</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="flex space-x-3">
+                                <button type="button" id="cancelImport" class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                                    Cancel
+                                </button>
+                                <button type="submit" class="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors">
+                                    <i class="fas fa-upload mr-2"></i>
+                                    Import Marks
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            
+            // Add modal to page
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            
+            // Add event listeners
+            document.getElementById('marksFile').addEventListener('change', function() {
+                const fileName = document.getElementById('marksFileName');
+                if (this.files && this.files[0]) {
+                    fileName.textContent = `Selected: ${this.files[0].name}`;
+                    fileName.classList.remove('hidden');
+                } else {
+                    fileName.classList.add('hidden');
+                }
+            });
+            
+            document.getElementById('cancelImport').addEventListener('click', closeImportMarksModal);
+            document.getElementById('importMarksForm').addEventListener('submit', handleMarksImport);
+            
+            // Close modal when clicking outside
+            document.getElementById('importMarksModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeImportMarksModal();
+                }
+            });
+        }
+        
+        function closeImportMarksModal() {
+            const modal = document.getElementById('importMarksModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
+        async function handleMarksImport(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('marksFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showAlert('error', 'Please select a file to upload');
+                return;
+            }
+            
+            try {
+                showAlert('info', 'Importing marks...');
+                
+                const formData = new FormData();
+                formData.append('marksFile', file);
+                
+                const idToken = await currentUser.getIdToken();
+                
+                const response = await fetch(`/api/teachers/import-marks/${currentSubjectId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`
+                    },
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('success', result.message);
+                    closeImportMarksModal();
+                    
+                    // Refresh the page data
+                    await loadSubjectData();
+                } else {
+                    throw new Error(result.error || 'Import failed');
+                }
+                
+            } catch (error) {
+                console.error('Import error:', error);
+                showAlert('error', error.message || 'Failed to import marks');
             }
         }
 
@@ -595,9 +728,9 @@
                                 <i class="fas fa-edit mr-2"></i>
                                 Edit
                             </button>
-                            <button class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors">
-                                <i class="fas fa-download mr-2"></i>
-                                Export Marks
+                            <button id="importMarksBtn" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors">
+                                <i class="fas fa-upload mr-2"></i>
+                                Import Marks
                             </button>
                         </div>
                     </div>
