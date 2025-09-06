@@ -32,7 +32,7 @@
         const auth = getAuth(app);
         
         // DOM Elements
-        let loginForm, emailInput, passwordInput, signInBtn, btnText, loadingSpinner, alertMessage, alertText, togglePassword, connectionStatus, keepSignedIn;
+        let loginForm, emailInput, passwordInput, signInBtn, btnText, loadingSpinner, alertMessage, alertText, togglePassword, keepSignedIn;
         
         document.addEventListener('DOMContentLoaded', () => {
             // Get DOM elements
@@ -45,19 +45,15 @@
             alertMessage = document.getElementById('alertMessage');
             alertText = document.getElementById('alertText');
             togglePassword = document.getElementById('togglePassword');
-            connectionStatus = document.getElementById('connectionStatus');
             keepSignedIn = document.getElementById('keepSignedIn');
             
-            // Update connection status
-            connectionStatus.innerHTML = '<i class="fas fa-circle text-green-500 mr-1"></i>Connected to Firebase';
-            
-            // Enable sign in button
+            // Enable sign in button (no connection status needed)
             signInBtn.disabled = false;
             
             // Check if user is already logged in
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
-                    console.log('✅ User already logged in:', user.email);
+                    console.log('User already logged in:', user.email);
                     await handleUserLogin(user);
                 }
             });
@@ -98,13 +94,13 @@
                 
                 // Sign in with Firebase
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                console.log('✅ Firebase login successful:', userCredential.user.email);
+                console.log('Firebase login successful:', userCredential.user.email);
                 
                 // Handle successful login
                 await handleUserLogin(userCredential.user);
                 
             } catch (error) {
-                console.error('❌ Login error:', error);
+                console.error('Login error:', error);
                 showLoading(false);
                 
                 let errorMessage = 'Login failed. Please try again.';
@@ -186,7 +182,7 @@
                 }
                 
             } catch (error) {
-                console.error('❌ Error handling login:', error);
+                console.error('Error handling login:', error);
                 showAlert('success', `Welcome ${firebaseUser.email}! Redirecting to dashboard...`);
                 
                 // Fallback redirect after 2 seconds
@@ -285,12 +281,6 @@
                     <p id="alertText" class="text-sm font-medium"></p>
                 </div>
 
-                <!-- Firebase Connection Status -->
-                <div id="connectionStatus" class="mb-4 p-2 rounded text-center text-xs">
-                    <i class="fas fa-circle animate-pulse text-yellow-500 mr-1"></i>
-                    Connecting to Firebase...
-                </div>
-
                 <!-- Login Form -->
                 <form id="loginForm" class="space-y-5">
                     <!-- Email Field -->
@@ -360,8 +350,7 @@
                     <button 
                         type="submit" 
                         id="signInBtn"
-                        class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2 sign-in-btn disabled:opacity-50"
-                        disabled
+                        class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2 sign-in-btn"
                     >
                         <i class="fas fa-sign-in-alt"></i>
                         <span id="btnText">Sign In</span>
