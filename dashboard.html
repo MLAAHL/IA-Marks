@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IA-MARKS MANAGEMENT - Teacher Dashboard</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="assets/css/dashboard.css">
+    
+    <!-- Firebase SDK v9 -->
+    <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+    import { getAuth, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+        
+    window.firebaseAuth = { onAuthStateChanged, signOut };
+    window.firebaseAuthPersistence = { setPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence };
+    window.getAuth = getAuth;
+        
+        window.addEventListener('firebaseConfigLoaded', (event) => {
+            const app = initializeApp(event.detail.config);
+            window.auth = getAuth(app);
+            window.dispatchEvent(new CustomEvent('firebaseReady'));
+        });
+    </script>
+    
+    <!-- Firebase Configuration -->
+    <script src="assets/js/firebase-config.js"></script>
+    
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#6366f1',
+                        'primary-dark': '#4f46e5',
+                        'accent': '#8b5cf6',
+                        'light-gray': '#f8fafc',
+                        'text-gray': '#64748b'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="min-h-screen bg-light-gray">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-100">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Left side - Logo and Title -->
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
+                        <i class="fas fa-chart-line text-white text-lg"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-semibold text-gray-900">IA-MARKS MANAGEMENT</h1>
+                        <p class="text-sm text-text-gray">Teacher Panel</p>
+                    </div>
+                </div>
+
+                <!-- Right side - User Email and Profile -->
+                <div class="flex items-center space-x-4">
+                    <!-- User Email -->
+                    <div class="text-right">
+                        <p id="userEmail" class="text-sm font-medium text-gray-900">Loading...</p>
+                    </div>
+                    
+                    <!-- Profile Dropdown -->
+                    <div class="relative">
+                        <button id="profileBtn" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-xl flex items-center justify-center text-white font-medium hover:shadow-lg transition-all duration-200">
+                            <i class="fas fa-user"></i>
+                        </button>
+                        
+                        <!-- Dropdown Menu -->
+                        <div id="profileDropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 py-2 z-10">
+                            <div class="px-4 py-2 border-b border-gray-100">
+                                <p id="dropdownUserEmail" class="text-sm text-gray-600 truncate">Loading...</p>
+                            </div>
+                            <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-user-cog mr-3 text-gray-400"></i>
+                                Profile Settings
+                            </a>
+                            <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-bell mr-3 text-gray-400"></i>
+                                Notifications
+                            </a>
+                            <div class="border-t border-gray-100 mt-2 pt-2">
+                                <button id="logoutBtn" class="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                                    <i class="fas fa-sign-out-alt mr-3"></i>
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Subject Status Card -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Subject Status</h2>
+                    <p class="text-sm text-text-gray">Active subjects</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mb-2">
+                        <span id="subjectCount" class="text-2xl font-bold text-white">0</span>
+                    </div>
+                    <p class="text-sm text-text-gray">Subjects</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State / Add First Subject -->
+        <div id="emptyState" class="text-center py-16">
+            <!-- Plus Icon -->
+            <div class="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-8 hover:bg-gray-200 transition-colors cursor-pointer" id="addSubjectIcon">
+                <i class="fas fa-plus text-3xl text-gray-400"></i>
+            </div>
+            
+            <!-- Content -->
+            <div class="max-w-md mx-auto">
+                <h3 class="text-2xl font-semibold text-gray-900 mb-4">Start Your Subject</h3>
+                <p class="text-text-gray mb-8">Add your first subject to begin managing IA marks</p>
+                
+                <!-- Add First Subject Button -->
+                <button id="addFirstSubjectBtn" class="inline-flex items-center px-8 py-4 bg-primary hover:bg-primary-dark text-white font-medium rounded-2xl transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl">
+                    <i class="fas fa-plus mr-3"></i>
+                    Add First Subject
+                </button>
+            </div>
+        </div>
+
+        <!-- Subjects List (Hidden initially, will show when subjects are added) -->
+        <!-- Subjects List (Hidden initially, will show when subjects are added) -->
+<!-- Subjects List (Your Class) -->
+<div id="subjectsList" class="hidden">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h3 class="text-xl font-semibold text-gray-900">Your Class</h3>
+            <p class="text-sm text-text-gray">Ready for uploading marks</p>
+        </div>
+        <button id="addSubjectBtn" class="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition-colors">
+            <i class="fas fa-plus mr-2"></i>
+            Add
+        </button>
+    </div>
+    
+    <!-- Subjects Grid -->
+    <div id="subjectsGrid" class="space-y-4">
+        <!-- Subject cards will be dynamically added here -->
+    </div>
+</div>
+
+
+    <!-- Add Subject Modal -->
+<!-- Add Subject Modal -->
+<div id="addSubjectModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-hidden shadow-2xl">
+        <!-- Header -->
+        <div class="relative p-6 border-b border-gray-100">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <i class="fas fa-plus text-white text-lg"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-gray-900 mb-1">Add New Subject</h3>
+                <p class="text-sm text-text-gray">Select class details for your queue</p>
+            </div>
+            <!-- Close Button Inside Modal -->
+            <button id="closeModal" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- Content -->
+        <div class="p-6 overflow-y-auto max-h-[50vh]">
+            <form id="addSubjectForm" class="space-y-6">
+                <!-- Academic Stream Section -->
+                <div>
+                    <div class="flex items-center mb-4">
+                        <i class="fas fa-graduation-cap text-primary mr-2"></i>
+                        <label class="text-sm font-medium text-gray-700">Academic Stream</label>
+                    </div>
+                    <div id="streamsList" class="space-y-3">
+                        <!-- Streams will be populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Semester Section -->
+                <div id="semesterSection" class="hidden">
+                    <div class="flex items-center mb-3">
+                        <i class="fas fa-calendar-alt text-primary mr-2"></i>
+                        <label for="semester" class="text-sm font-medium text-gray-700">Semester</label>
+                    </div>
+                    <select 
+                        id="semester" 
+                        name="semester"
+                        class="w-full px-4 py-3 bg-gray-50 border-0 rounded-lg focus:ring-2 focus:ring-primary focus:bg-white transition-all duration-200 text-gray-800"
+                        disabled
+                    >
+                        <option value="">Select semester</option>
+                    </select>
+                </div>
+
+                <!-- Subject Section -->
+                <div id="subjectSection" class="hidden">
+                    <div class="flex items-center mb-3">
+                        <i class="fas fa-book text-primary mr-2"></i>
+                        <label for="subject" class="text-sm font-medium text-gray-700">Subject</label>
+                    </div>
+                    <select 
+                        id="subject" 
+                        name="subject"
+                        class="w-full px-4 py-3 bg-gray-50 border-0 rounded-lg focus:ring-2 focus:ring-primary focus:bg-white transition-all duration-200 text-gray-800"
+                        disabled
+                    >
+                        <option value="">Select stream & semester first</option>
+                    </select>
+                    <p class="text-xs text-text-gray mt-2">Choose stream and semester first</p>
+                </div>
+            </form>
+        </div>
+
+        <!-- Footer with Add Button -->
+        <div class="p-6 border-t border-gray-100 bg-gray-50">
+            <button 
+                type="button" 
+                id="addToQueueBtn"
+                class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300"
+                disabled
+            >
+                <i class="fas fa-plus"></i>
+                <span>Add Subject</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Confirmation Modal -->
+<div id="confirmationModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl w-full max-w-md shadow-2xl transform scale-95 opacity-0 transition-all duration-200" id="confirmationModalContent">
+        <!-- Header -->
+        <div class="p-6 border-b border-gray-100">
+            <div class="flex items-center space-x-3">
+                <div class="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
+                    <i class="fas fa-exclamation-triangle text-red-600 text-lg"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900">Remove Subject</h3>
+                    <p class="text-sm text-gray-500">This action cannot be undone</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Content -->
+        <div class="p-6">
+            <p id="confirmationMessage" class="text-gray-700 leading-relaxed">
+                Are you sure you want to remove this subject from your class?
+            </p>
+        </div>
+        
+        <!-- Actions -->
+        <div class="p-6 bg-gray-50 rounded-b-2xl flex space-x-3">
+            <button id="confirmationCancel" class="flex-1 px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+            </button>
+            <button id="confirmationConfirm" class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors">
+                Remove Subject
+            </button>
+        </div>
+    </div>
+</div>
+
+
+    <!-- Alert Message -->
+    <div id="alertMessage" class="hidden fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm">
+        <p id="alertText" class="text-sm font-medium"></p>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="assets/js/dashboard.js"></script>
+</body>
+</html>
