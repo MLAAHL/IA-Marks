@@ -1,854 +1,422 @@
-/**
- * IA-MARKS MANAGEMENT Dashboard with Custom Confirmation Modal
- */
+// Dashboard JavaScript - Load User Data After Login
+let auth;
+let currentUser = null;
 
-class DashboardManager {
-    constructor() {
-        this.subjects = [];
-        this.streams = [];
-        this.selectedStream = null;
-        this.selectedSemester = null;
-        this.selectedSubject = null;
-        this.currentUser = null;
-        this.isFirebaseReady = false;
-        this.API_BASE_URL = 'http://localhost:5000/api';
-        this.pendingRemovalSubjectId = null; // For confirmation modal
-        this.pendingRemovalSubjectName = null; // For confirmation modal
-        
-        this.init();
-    }
+// Wait for Firebase to be ready
+window.addEventListener('firebaseReady', () => {
+    auth = window.auth;
+    initializeDashboard();
+});
 
-    init() {
-        this.bindEvents();
-        this.setupFirebaseAuth();
-        this.updateUI();
-    }
-
-    async initializeDatabase() {
-        try {
-            await fetch(`${this.API_BASE_URL}/academic/initialize-new`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            console.log('Database initialized with new structure');
-        } catch (error) {
-            console.log('Database initialization error:', error);
+function initializeDashboard() {
+    // Listen for authentication state changes
+    window.firebaseAuth.onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            currentUser = user;
+            console.log('✅ User authenticated:', user.email);
+            
+            // Display user information
+            displayUserInfo(user);
+            
+            // Load teacher profile data
+            await loadTeacherProfile(user);
+            
+            // Initialize UI interactions
+            initializeUIHandlers();
+            
+        } else {
+            console.log('❌ No user authenticated, redirecting to login');
+            window.location.href = '/index.html';
         }
+    });
+}
+
+function displayUserInfo(user) {
+    const email = user.email;
+    const displayName = user.displayName || email.split('@')[0];
+    
+    // Update email displays
+    document.getElementById('userEmail').textContent = email;
+    document.getElementById('dropdownUserEmail').textContent = email;
+    
+    // Update profile button with user initials or photo
+    const profileBtn = document.getElementById('profileBtn');
+    if (user.photoURL) {
+        profileBtn.innerHTML = `<img src="${user.photoURL}" alt="Profile" class="w-8 h-8 rounded-lg object-cover">`;
+    } else {
+        const initials = displayName.substring(0, 2).toUpperCase();
+        profileBtn.innerHTML = `<span class="text-sm font-bold">${initials}</span>`;
     }
+    
+    profileBtn.setAttribute('title', `${displayName} (${email})`);
+    
+    console.log('✅ User info displayed successfully');
+}
 
-    bindEvents() {
-        // Logout button
-        document.getElementById('logoutBtn').addEventListener('click', (e) => {
-            e.preventDefault();
-            this.handleLogout();
-        });
+async function loadTeacherProfile(user) {
+    try {
+        showAlert('info', 'Loading your profile...');
         
-        // Profile dropdown
-        document.getElementById('profileBtn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.toggleProfileDropdown();
-        });
+        // Get Firebase ID token
+        const idToken = await user.getIdToken();
         
-        // Add subject buttons
-        document.getElementById('addFirstSubjectBtn')?.addEventListener('click', () => this.openAddSubjectModal());
-        document.getElementById('addSubjectBtn')?.addEventListener('click', () => this.openAddSubjectModal());
-        document.getElementById('addSubjectIcon')?.addEventListener('click', () => this.openAddSubjectModal());
-        
-        // Modal controls
-        document.getElementById('closeModal')?.addEventListener('click', () => this.closeAddSubjectModal());
-        document.getElementById('addToQueueBtn')?.addEventListener('click', () => this.handleAddToQueue());
-        
-        // Form controls
-        document.getElementById('semester')?.addEventListener('change', (e) => this.handleSemesterChange(e));
-        document.getElementById('subject')?.addEventListener('change', (e) => this.handleSubjectChange(e));
-        
-        // Custom confirmation modal bindings
-        document.getElementById('confirmationCancel')?.addEventListener('click', () => this.hideConfirmationModal());
-        document.getElementById('confirmationConfirm')?.addEventListener('click', () => this.confirmRemoveSubject());
-        
-        // *** EVENT DELEGATION FOR DYNAMIC BUTTONS ***
-        const subjectsGrid = document.getElementById('subjectsGrid');
-        if (subjectsGrid) {
-            subjectsGrid.addEventListener('click', (e) => {
-                const target = e.target.closest('button[data-action]');
-                if (!target) return;
-
-                const action = target.getAttribute('data-action');
-                const subjectId = target.getAttribute('data-subject-id');
-                const subjectName = target.getAttribute('data-subject-name');
-
-                if (action === 'remove' && subjectId && subjectName) {
-                    e.preventDefault();
-                    this.showConfirmationModal(subjectId, subjectName);
-                } else if (action === 'attend' && subjectId) {
-                    e.preventDefault();
-                    this.attendSubject(subjectId);
-                }
-            });
-        }
-        
-        // Close dropdown when clicking outside
-        document.addEventListener('click', (e) => this.handleOutsideClick(e));
-        
-        // Close modals when clicking outside
-        document.getElementById('addSubjectModal')?.addEventListener('click', (e) => {
-            if (e.target.id === 'addSubjectModal') {
-                this.closeAddSubjectModal();
+        // Fetch teacher profile from your API
+        const response = await fetch('/api/teachers/profile', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${idToken}`,
+                'Content-Type': 'application/json'
             }
         });
         
-        document.getElementById('confirmationModal')?.addEventListener('click', (e) => {
-            if (e.target.id === 'confirmationModal') {
-                this.hideConfirmationModal();
-            }
-        });
-    }
-
-    setupFirebaseAuth() {
-        if (localStorage.getItem('userLoggedOut') === 'true') {
-            this.redirectToLogin();
-            return;
-        }
-
-        const userEmail = document.getElementById('userEmail');
-        if (userEmail) {
-            userEmail.textContent = 'Loading...';
-        }
-
-        window.addEventListener('firebaseReady', () => {
-            this.isFirebaseReady = true;
-            this.auth = window.auth;
-            this.setupAuthStateListener();
-        });
-
-        setTimeout(() => {
-            if (!this.isFirebaseReady) {
-                console.error('Firebase initialization timeout');
-                this.checkLocalSession();
-            }
-        }, 10000);
-    }
-
-    setupAuthStateListener() {
-        window.firebaseAuth.onAuthStateChanged(this.auth, (user) => {
-            if (localStorage.getItem('userLoggedOut') === 'true') {
-                this.redirectToLogin();
-                return;
-            }
-
-            if (user) {
-                this.currentUser = user;
-                this.updateUserInfo(user);
+        if (response.ok) {
+            const data = await response.json();
+            
+            if (data.success) {
+                const teacherData = data.data;
+                console.log('✅ Teacher profile loaded:', teacherData);
                 
-                const userSession = {
-                    uid: user.uid,
-                    email: user.email,
-                    displayName: user.displayName,
-                    lastLoginAt: new Date().toISOString()
-                };
-                localStorage.setItem('userSession', JSON.stringify(userSession));
+                // Update subject count
+                const subjectsCount = teacherData.createdSubjects?.length || 0;
+                document.getElementById('subjectCount').textContent = subjectsCount;
                 
-                this.loadTeacherSubjects();
-                console.log('✅ User authenticated:', user.email);
-            } else {
-                console.log('❌ User not authenticated, redirecting to login');
-                this.currentUser = null;
-                localStorage.removeItem('userSession');
-                this.redirectToLogin();
-            }
-        });
-    }
-
-    checkLocalSession() {
-        if (localStorage.getItem('userLoggedOut') === 'true') {
-            this.redirectToLogin();
-            return;
-        }
-
-        const userSession = localStorage.getItem('userSession');
-        if (userSession) {
-            try {
-                const session = JSON.parse(userSession);
-                this.updateUserInfo({ email: session.email });
-                this.loadTeacherSubjects();
-            } catch (error) {
-                console.error('Invalid session data');
-                this.redirectToLogin();
-            }
-        } else {
-            this.redirectToLogin();
-        }
-    }
-
-    updateUserInfo(user) {
-        const userEmail = document.getElementById('userEmail');
-        const dropdownUserEmail = document.getElementById('dropdownUserEmail');
-        
-        if (userEmail) {
-            userEmail.textContent = user.email || user.displayName || 'User';
-        }
-        if (dropdownUserEmail) {
-            dropdownUserEmail.textContent = user.email || user.displayName || 'User';
-        }
-        
-        this.currentUser = user;
-    }
-
-    // Custom confirmation modal methods
-    showConfirmationModal(subjectId, subjectName) {
-        this.pendingRemovalSubjectId = subjectId;
-        this.pendingRemovalSubjectName = subjectName;
-        
-        const modal = document.getElementById('confirmationModal');
-        const content = document.getElementById('confirmationModalContent');
-        const message = document.getElementById('confirmationMessage');
-        
-        if (message) {
-            message.textContent = `Are you sure you want to remove "${subjectName}" from your class?`;
-        }
-        
-        if (modal) {
-            modal.classList.remove('hidden');
-            setTimeout(() => {
-                modal.classList.add('show');
-                if (content) {
-                    content.style.transform = 'scale(1)';
-                    content.style.opacity = '1';
+                // Show appropriate section based on subjects
+                if (subjectsCount > 0) {
+                    showSubjectsList(teacherData.createdSubjects);
+                } else {
+                    showEmptyState();
                 }
-            }, 10);
-        }
-    }
-
-    hideConfirmationModal() {
-        const modal = document.getElementById('confirmationModal');
-        const content = document.getElementById('confirmationModalContent');
-        
-        if (modal) {
-            modal.classList.remove('show');
-            modal.classList.add('hide');
-        }
-        
-        if (content) {
-            content.style.transform = 'scale(0.95)';
-            content.style.opacity = '0';
-        }
-        
-        setTimeout(() => {
-            if (modal) {
-                modal.classList.add('hidden');
-                modal.classList.remove('hide');
-            }
-            this.pendingRemovalSubjectId = null;
-            this.pendingRemovalSubjectName = null;
-        }, 200);
-    }
-
-    async confirmRemoveSubject() {
-        if (!this.pendingRemovalSubjectId) return;
-        
-        const subjectId = this.pendingRemovalSubjectId;
-        this.hideConfirmationModal();
-        
-        try {
-            console.log('🗑️ Removing subject:', subjectId);
-            
-            const teacherId = await this.getAuthenticatedUserId();
-            
-            if (!teacherId) {
-                this.showAlert('Please log in to remove subjects', 'error');
-                return;
-            }
-
-            this.showAlert('Removing subject...', 'info');
-
-            const response = await fetch(`${this.API_BASE_URL}/teacher/${teacherId}/subjects/${subjectId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const result = await response.json();
-            
-            console.log('📡 Remove response:', result);
-
-            if (result.success) {
-                this.showAlert('Subject removed successfully', 'success');
-                await this.loadTeacherSubjects();
-            } else {
-                this.showAlert(result.message || 'Error removing subject', 'error');
-            }
-            
-        } catch (error) {
-            console.error('❌ Error removing subject:', error);
-            this.showAlert('Error connecting to server', 'error');
-        }
-    }
-
-    // Add attend subject method
-    attendSubject(subjectId) {
-        console.log('Attend subject:', subjectId);
-        this.showAlert('Opening subject page...', 'info');
-        setTimeout(() => {
-            window.location.href = `/attendance.html?subject=${subjectId}`;
-        }, 1000);
-    }
-
-    async loadTeacherSubjects() {
-        try {
-            const teacherId = await this.getAuthenticatedUserId();
-            
-            if (!teacherId) {
-                console.log('❌ No authenticated user found');
-                this.subjects = [];
-                this.updateSubjectCount();
-                this.updateUI();
-                return;
-            }
-
-            console.log('📚 Loading subjects for teacher:', teacherId);
-            
-            const response = await fetch(`${this.API_BASE_URL}/teacher/${teacherId}/subjects`);
-            const result = await response.json();
-
-            console.log('📡 Server response:', result);
-
-            if (result.success && result.subjects) {
-                this.subjects = result.subjects;
-                console.log('✅ Loaded', this.subjects.length, 'subjects from database');
-            } else {
-                console.log('📭 No subjects found');
-                this.subjects = [];
-            }
-            
-            this.updateSubjectCount();
-            this.renderSubjects();
-            this.updateUI();
-            
-        } catch (error) {
-            console.error('❌ Error loading subjects:', error);
-            this.subjects = [];
-            this.updateSubjectCount();
-            this.updateUI();
-        }
-    }
-
-    async loadStreams() {
-        try {
-            console.log('📚 Loading streams from API...');
-            
-            const response = await fetch(`${this.API_BASE_URL}/academic/streams`);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            
-            const result = await response.json();
-            
-            console.log('📡 API Response:', result);
-            
-            if (result.success && result.streams) {
-                this.streams = result.streams;
-                console.log('✅ Loaded', this.streams.length, 'streams');
-                this.renderStreams();
-            } else {
-                throw new Error(result.message || 'No streams data received');
-            }
-        } catch (error) {
-            console.error('❌ Error loading streams:', error);
-            this.showAlert('Error loading academic streams. Please check if database is populated.', 'error');
-            this.checkDatabaseStatus();
-        }
-    }
-
-    async checkDatabaseStatus() {
-        try {
-            const response = await fetch(`${this.API_BASE_URL}/academic/status`);
-            const result = await response.json();
-            
-            if (result.success && result.database.status === 'empty') {
-                this.showAlert('Database is empty. Please populate it first.', 'error');
-            }
-        } catch (error) {
-            console.error('Database status check failed:', error);
-        }
-    }
-
-    renderStreams() {
-        const streamsList = document.getElementById('streamsList');
-        if (!streamsList) return;
-
-        streamsList.innerHTML = '';
-
-        this.streams.forEach(stream => {
-            const streamDiv = document.createElement('div');
-            streamDiv.className = 'stream-option';
-            streamDiv.innerHTML = `
-                <label class="flex items-center p-4 rounded-lg border-2 border-gray-200 cursor-pointer hover:border-primary hover:bg-blue-50 transition-all duration-200 group">
-                    <input type="radio" name="stream" value="${stream._id}" class="sr-only stream-radio">
-                    <div class="flex items-center space-x-3 flex-1">
-                        <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: ${stream.color || '#6366f1'}20;">
-                            <i class="${stream.icon || 'fas fa-graduation-cap'}" style="color: ${stream.color || '#6366f1'};"></i>
-                        </div>
-                        <div>
-                            <div class="font-semibold text-gray-900 group-hover:text-primary transition-colors">${stream.name}</div>
-                            <div class="text-sm text-gray-500">All semesters</div>
-                        </div>
-                    </div>
-                    <div class="w-5 h-5 border-2 border-gray-300 rounded-full flex items-center justify-center radio-indicator transition-all duration-200">
-                        <div class="w-2.5 h-2.5 bg-primary rounded-full opacity-0 scale-0 transition-all duration-200 radio-dot"></div>
-                    </div>
-                </label>
-            `;
-
-            const radio = streamDiv.querySelector('.stream-radio');
-            const label = streamDiv.querySelector('label');
-            const indicator = streamDiv.querySelector('.radio-indicator');
-            const dot = streamDiv.querySelector('.radio-dot');
-
-            radio.addEventListener('change', () => {
-                if (radio.checked) {
-                    this.handleStreamSelection(stream);
-                    this.updateStreamSelection(streamsList, label, indicator, dot);
-                }
-            });
-
-            streamsList.appendChild(streamDiv);
-        });
-    }
-
-    updateStreamSelection(container, selectedLabel, selectedIndicator, selectedDot) {
-        container.querySelectorAll('label').forEach(label => {
-            label.classList.remove('border-primary', 'bg-blue-50');
-            label.classList.add('border-gray-200');
-        });
-        container.querySelectorAll('.radio-indicator').forEach(indicator => {
-            indicator.classList.remove('border-primary');
-            indicator.classList.add('border-gray-300');
-        });
-        container.querySelectorAll('.radio-dot').forEach(dot => {
-            dot.classList.add('opacity-0', 'scale-0');
-        });
-        
-        selectedLabel.classList.add('border-primary', 'bg-blue-50');
-        selectedLabel.classList.remove('border-gray-200');
-        selectedIndicator.classList.add('border-primary');
-        selectedIndicator.classList.remove('border-gray-300');
-        selectedDot.classList.remove('opacity-0', 'scale-0');
-    }
-
-    async handleStreamSelection(stream) {
-        this.selectedStream = stream;
-        this.selectedSemester = null;
-        this.selectedSubject = null;
-        
-        const semesterSection = document.getElementById('semesterSection');
-        const semesterSelect = document.getElementById('semester');
-        
-        if (semesterSection && semesterSelect) {
-            semesterSection.classList.remove('hidden');
-            semesterSelect.disabled = false;
-            semesterSelect.focus();
-            
-            semesterSelect.innerHTML = '<option value="">Select semester</option>';
-            stream.semesters.forEach(semester => {
-                const option = document.createElement('option');
-                option.value = semester;
-                option.textContent = `Semester ${semester}`;
-                semesterSelect.appendChild(option);
-            });
-        }
-        
-        const subjectSection = document.getElementById('subjectSection');
-        const subjectSelect = document.getElementById('subject');
-        if (subjectSection) subjectSection.classList.add('hidden');
-        if (subjectSelect) subjectSelect.innerHTML = '<option value="">Select stream & semester first</option>';
-        this.updateAddButton();
-    }
-
-    async handleSemesterChange(e) {
-        const semesterNumber = e.target.value;
-        if (!semesterNumber || !this.selectedStream) return;
-        
-        this.selectedSemester = semesterNumber;
-        this.selectedSubject = null;
-        
-        const subjectSection = document.getElementById('subjectSection');
-        const subjectSelect = document.getElementById('subject');
-        
-        if (subjectSection && subjectSelect) {
-            subjectSection.classList.remove('hidden');
-            subjectSelect.disabled = false;
-            subjectSelect.focus();
-            
-            try {
-                const response = await fetch(`${this.API_BASE_URL}/academic/streams/${this.selectedStream._id}/semester/${semesterNumber}/subjects`);
-                const result = await response.json();
                 
-                if (result.success) {
-                    subjectSelect.innerHTML = '<option value="">Select subject</option>';
-                    result.subjects.forEach(subject => {
-                        const option = document.createElement('option');
-                        option.value = subject._id;
-                        option.textContent = `${subject.name}`;
-                        option.dataset.name = subject.name;
-                        option.dataset.code = subject.code || `${this.selectedStream.name}${semesterNumber}01`;
-                        subjectSelect.appendChild(option);
-                    });
-                }
-            } catch (error) {
-                console.error('Error loading subjects:', error);
-                this.showAlert('Error loading subjects', 'error');
-            }
-        }
-        
-        this.updateAddButton();
-    }
-
-    handleSubjectChange(e) {
-        const subjectId = e.target.value;
-        if (!subjectId) {
-            this.selectedSubject = null;
-        } else {
-            const option = e.target.selectedOptions[0];
-            this.selectedSubject = {
-                id: subjectId,
-                name: option.dataset.name,
-                code: option.dataset.code
-            };
-        }
-        this.updateAddButton();
-    }
-
-    updateAddButton() {
-        const addBtn = document.getElementById('addToQueueBtn');
-        if (!addBtn) return;
-        
-        const canAdd = this.selectedStream && this.selectedSemester && this.selectedSubject;
-        
-        addBtn.disabled = !canAdd;
-        
-        if (canAdd) {
-            addBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'disabled:bg-gray-300');
-            addBtn.classList.add('bg-primary', 'hover:bg-primary-dark');
-        } else {
-            addBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            addBtn.classList.remove('hover:bg-primary-dark');
-        }
-    }
-
-    async handleAddToQueue() {
-        if (!this.selectedStream || !this.selectedSemester || !this.selectedSubject) {
-            this.showAlert('Please select all required fields', 'error');
-            return;
-        }
-
-        const addBtn = document.getElementById('addToQueueBtn');
-        if (!addBtn) return;
-        
-        const originalText = addBtn.innerHTML;
-        
-        addBtn.disabled = true;
-        addBtn.innerHTML = `
-            <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-            <span>Adding...</span>
-        `;
-
-        try {
-            const teacherId = await this.getAuthenticatedUserId();
-            
-            if (!teacherId) {
-                throw new Error('Please log in to add subjects');
-            }
-
-            console.log('📝 Adding subject for teacher:', teacherId);
-            
-            const response = await fetch(`${this.API_BASE_URL}/teacher/add-subject`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    teacherId: teacherId,
-                    streamId: this.selectedStream._id,
-                    semester: parseInt(this.selectedSemester),
-                    subjectId: this.selectedSubject.id
-                })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                this.showAlert(`${this.selectedSubject.name} added successfully!`, 'success');
-                this.closeAddSubjectModal();
-                await this.loadTeacherSubjects();
+                // Store teacher data for later use
+                localStorage.setItem('teacherProfile', JSON.stringify(teacherData));
+                
+                hideAlert();
+                
             } else {
-                this.showAlert(result.message || 'Error adding subject', 'error');
+                throw new Error(data.error || 'Failed to load profile');
             }
-        } catch (error) {
-            console.error('❌ Error adding subject:', error);
-            this.showAlert(error.message || 'Error connecting to server', 'error');
-        } finally {
-            addBtn.disabled = false;
-            addBtn.innerHTML = originalText;
-            this.updateAddButton();
-        }
-    }
-
-    async getAuthenticatedUserId() {
-        return new Promise((resolve) => {
-            if (this.currentUser?.uid) {
-                resolve(this.currentUser.uid);
-                return;
-            }
-
-            const userSession = localStorage.getItem('userSession');
-            if (userSession) {
-                try {
-                    const session = JSON.parse(userSession);
-                    if (session.uid) {
-                        resolve(session.uid);
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Invalid session data');
-                }
-            }
-
-            if (this.isFirebaseReady && this.auth) {
-                const timeout = setTimeout(() => {
-                    console.error('Firebase auth timeout');
-                    resolve(null);
-                }, 10000);
-
-                const unsubscribe = window.firebaseAuth.onAuthStateChanged(this.auth, (user) => {
-                    clearTimeout(timeout);
-                    unsubscribe();
-                    if (user) {
-                        this.currentUser = user;
-                        resolve(user.uid);
-                    } else {
-                        resolve(null);
-                    }
-                });
-            } else {
-                resolve(null);
-            }
-        });
-    }
-
-    async openAddSubjectModal() {
-        const modal = document.getElementById('addSubjectModal');
-        if (!modal) return;
-        
-        modal.classList.remove('hidden');
-        
-        setTimeout(() => {
-            const content = modal.querySelector('.bg-white');
-            if (content) {
-                content.style.transform = 'scale(1)';
-                content.style.opacity = '1';
-            }
-        }, 10);
-        
-        await this.loadStreams();
-        this.resetModalForm();
-    }
-
-    closeAddSubjectModal() {
-        const modal = document.getElementById('addSubjectModal');
-        if (!modal) return;
-        
-        const modalContent = modal.querySelector('.bg-white');
-        
-        if (modalContent) {
-            modalContent.style.transform = 'scale(0.95)';
-            modalContent.style.opacity = '0';
-        }
-        
-        setTimeout(() => {
-            modal.classList.add('hidden');
-            if (modalContent) {
-                modalContent.style.transform = 'scale(1)';
-                modalContent.style.opacity = '1';
-            }
-        }, 150);
-        
-        this.resetModalForm();
-    }
-
-    resetModalForm() {
-        this.selectedStream = null;
-        this.selectedSemester = null;
-        this.selectedSubject = null;
-        
-        const semesterSection = document.getElementById('semesterSection');
-        const subjectSection = document.getElementById('subjectSection');
-        const semesterSelect = document.getElementById('semester');
-        const subjectSelect = document.getElementById('subject');
-        
-        if (semesterSection) semesterSection.classList.add('hidden');
-        if (subjectSection) subjectSection.classList.add('hidden');
-        if (semesterSelect) semesterSelect.innerHTML = '<option value="">Select semester</option>';
-        if (subjectSelect) subjectSelect.innerHTML = '<option value="">Select stream & semester first</option>';
-        
-        document.querySelectorAll('.stream-radio').forEach(radio => {
-            radio.checked = false;
-        });
-        
-        this.updateAddButton();
-    }
-
-    updateSubjectCount() {
-        const countElement = document.getElementById('subjectCount');
-        if (countElement) {
-            countElement.textContent = this.subjects.length;
-        }
-    }
-
-    updateUI() {
-        const emptyState = document.getElementById('emptyState');
-        const subjectsList = document.getElementById('subjectsList');
-        
-        if (this.subjects.length === 0) {
-            if (emptyState) emptyState.classList.remove('hidden');
-            if (subjectsList) subjectsList.classList.add('hidden');
+            
         } else {
-            if (emptyState) emptyState.classList.add('hidden');
-            if (subjectsList) subjectsList.classList.remove('hidden');
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-    }
-
-    renderSubjects() {
-        const grid = document.getElementById('subjectsGrid');
-        if (!grid) return;
-
-        grid.innerHTML = '';
-
-        this.subjects.forEach(subject => {
-            const card = this.createSubjectCard(subject);
-            grid.appendChild(card);
-        });
-    }
-
-    // *** UPDATED SUBJECT CARD WITH DATA ATTRIBUTES ***
-    createSubjectCard(subject) {
-        const card = document.createElement('div');
-        card.className = 'bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200';
-
-        card.innerHTML = `
-            <div class="flex items-start justify-between mb-4">
-                <div class="flex items-start space-x-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg" style="background-color: ${subject.streamColor || '#6366f1'};">
-                        ${subject.serialNumber}
-                    </div>
-                    <div class="flex-1">
-                        <div class="flex items-center space-x-2 mb-1">
-                            <i class="${subject.streamIcon || 'fas fa-graduation-cap'}" style="color: ${subject.streamColor || '#6366f1'};"></i>
-                            <h3 class="text-lg font-semibold text-gray-900">${subject.name.toUpperCase()}</h3>
-                        </div>
-                        <div class="flex items-center space-x-4 text-sm text-gray-600 mb-2">
-                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium" style="background-color: ${subject.streamColor || '#6366f1'}20; color: ${subject.streamColor || '#6366f1'};">
-                                ${subject.stream}
-                            </span>
-                            <span>Sem ${subject.semester}</span>
-                        </div>
-                        <p class="text-xs text-gray-500">Added: ${subject.addedTime}</p>
-                    </div>
-                </div>
-                <button class="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-full transition-colors" 
-                        data-action="remove" 
-                        data-subject-id="${subject.id}" 
-                        data-subject-name="${subject.name.replace(/"/g, '&quot;')}" 
-                        title="Remove Subject">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            
-            <button class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2" 
-                    data-action="attend" 
-                    data-subject-id="${subject.id}">
-                <i class="fas fa-user-check"></i>
-                <span>Manage</span>
-            </button>
-        `;
-
-        return card;
-    }
-
-    async handleLogout() {
-        try {
-            this.showAlert('Signing out...', 'info');
-            localStorage.setItem('userLoggedOut', 'true');
-            localStorage.removeItem('userSession');
-            localStorage.removeItem('rememberedEmail');
-            localStorage.removeItem('ia-marks-subjects');
-            localStorage.removeItem('currentSubject');
-            sessionStorage.clear();
-            
-            try {
-                if (this.isFirebaseReady && this.auth) {
-                    await window.firebaseAuth.signOut(this.auth);
-                    console.log('Firebase logout successful');
-                }
-            } catch (signOutError) {
-                console.error('Firebase signOut failed (continuing):', signOutError);
-            }
-            
-            this.showAlert('Logged out successfully!', 'success');
-            setTimeout(() => {
-                window.location.replace('/index.html');
-            }, 300);
-        } catch (error) {
-            console.error('Logout error:', error);
-            localStorage.setItem('userLoggedOut', 'true');
-            localStorage.removeUser('userSession');
-            localStorage.removeItem('rememberedEmail');
-            localStorage.removeItem('ia-marks-subjects');
-            localStorage.removeItem('currentSubject');
-            sessionStorage.clear();
-            this.showAlert('Logged out successfully!', 'success');
-            setTimeout(() => {
-                window.location.replace('/index.html');
-            }, 1000);
-        }
-    }
-
-    redirectToLogin() {
-        window.location.replace('/index.html');
-    }
-
-    toggleProfileDropdown() {
-        const dropdown = document.getElementById('profileDropdown');
-        if (dropdown) {
-            dropdown.classList.toggle('hidden');
-        }
-    }
-
-    handleOutsideClick(e) {
-        const dropdown = document.getElementById('profileDropdown');
-        const profileBtn = document.getElementById('profileBtn');
         
-        if (dropdown && profileBtn && !dropdown.contains(e.target) && !profileBtn.contains(e.target)) {
-            dropdown.classList.add('hidden');
-        }
-    }
-
-    showAlert(message, type = 'info') {
-        const alert = document.getElementById('alertMessage');
-        const alertText = document.getElementById('alertText');
+    } catch (error) {
+        console.error('❌ Error loading teacher profile:', error);
+        showAlert('error', 'Failed to load profile. Please refresh the page.');
         
-        if (alert && alertText) {
-            alert.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm alert-${type}`;
-            alertText.textContent = message;
-            alert.classList.remove('hidden');
-            
-            setTimeout(() => {
-                alert.classList.add('hidden');
-            }, 4000);
-        }
+        // Show empty state as fallback
+        showEmptyState();
     }
 }
 
-// Initialize dashboard when DOM is ready
+function showSubjectsList(subjects) {
+    // Hide empty state and show subjects list
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('subjectsList').classList.remove('hidden');
+    
+    // Render subjects in the grid
+    renderSubjects(subjects);
+}
+
+function showEmptyState() {
+    // Show empty state and hide subjects list
+    document.getElementById('emptyState').classList.remove('hidden');
+    document.getElementById('subjectsList').classList.add('hidden');
+}
+
+function renderSubjects(subjects) {
+    const subjectsGrid = document.getElementById('subjectsGrid');
+    
+    if (!subjects || subjects.length === 0) {
+        subjectsGrid.innerHTML = '<p class="text-gray-500 text-center py-8">No subjects found</p>';
+        return;
+    }
+    
+    // Clear existing content
+    subjectsGrid.innerHTML = '';
+    
+    // Create subject cards
+    subjects.forEach((subject, index) => {
+        const subjectCard = createSubjectCard(subject, index);
+        subjectsGrid.appendChild(subjectCard);
+    });
+}
+
+function createSubjectCard(subject, index) {
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200';
+    
+    card.innerHTML = `
+        <div class="flex items-center justify-between mb-4">
+            <div class="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center">
+                <i class="fas fa-book text-white text-lg"></i>
+            </div>
+            <div class="relative">
+                <button class="text-gray-400 hover:text-gray-600 transition-colors" onclick="toggleSubjectMenu(${index})">
+                    <i class="fas fa-ellipsis-v"></i>
+                </button>
+                <div id="subjectMenu${index}" class="hidden absolute right-0 mt-2 w-32 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-10">
+                    <button onclick="editSubject(${index})" class="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50">
+                        <i class="fas fa-edit mr-2"></i>Edit
+                    </button>
+                    <button onclick="removeSubject('${subject.subjectId}', '${subject.streamId}', ${subject.semester})" class="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
+                        <i class="fas fa-trash mr-2"></i>Remove
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mb-4">
+            <h3 class="text-lg font-semibold text-gray-900 mb-1">${subject.subjectName}</h3>
+            <div class="text-sm text-gray-500 space-y-1">
+                <p><i class="fas fa-graduation-cap mr-2 text-primary"></i>${subject.streamName}</p>
+                <p><i class="fas fa-calendar-alt mr-2 text-primary"></i>${subject.semesterName}</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+            <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Active</span>
+            <button onclick="openSubjectDashboard('${subject.subjectId}')" class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
+                Open Dashboard →
+            </button>
+        </div>
+    `;
+    
+    return card;
+}
+
+function initializeUIHandlers() {
+    // Profile dropdown toggle
+    const profileBtn = document.getElementById('profileBtn');
+    const profileDropdown = document.getElementById('profileDropdown');
+    
+    profileBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        profileDropdown.classList.toggle('hidden');
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!profileDropdown.contains(e.target) && !profileBtn.contains(e.target)) {
+            profileDropdown.classList.add('hidden');
+        }
+    });
+    
+    // Logout functionality
+    document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+    
+    // Add subject buttons
+    document.getElementById('addFirstSubjectBtn').addEventListener('click', openAddSubjectModal);
+    document.getElementById('addSubjectBtn').addEventListener('click', openAddSubjectModal);
+    document.getElementById('addSubjectIcon').addEventListener('click', openAddSubjectModal);
+    
+    // Modal handlers
+    document.getElementById('closeModal').addEventListener('click', closeAddSubjectModal);
+    document.getElementById('addSubjectModal').addEventListener('click', (e) => {
+        if (e.target.id === 'addSubjectModal') {
+            closeAddSubjectModal();
+        }
+    });
+    
+    console.log('✅ UI handlers initialized');
+}
+
+async function handleLogout() {
+    try {
+        showAlert('info', 'Signing out...');
+        
+        // Clear stored data
+        localStorage.removeItem('teacherProfile');
+        localStorage.removeItem('teacherData');
+        
+        // Sign out from Firebase
+        await window.firebaseAuth.signOut(auth);
+        
+        console.log('✅ User signed out successfully');
+        
+        // Redirect to login
+        window.location.href = '/login.html';
+        
+    } catch (error) {
+        console.error('❌ Logout error:', error);
+        showAlert('error', 'Failed to sign out. Please try again.');
+    }
+}
+
+// Subject management functions
+function toggleSubjectMenu(index) {
+    const menu = document.getElementById(`subjectMenu${index}`);
+    
+    // Close all other menus
+    document.querySelectorAll('[id^="subjectMenu"]').forEach(m => {
+        if (m !== menu) m.classList.add('hidden');
+    });
+    
+    menu.classList.toggle('hidden');
+}
+
+function editSubject(index) {
+    // Close menu
+    document.getElementById(`subjectMenu${index}`).classList.add('hidden');
+    
+    showAlert('info', 'Edit functionality coming soon!');
+}
+
+function removeSubject(subjectId, streamId, semester) {
+    // Show confirmation modal
+    showConfirmation(
+        'Remove Subject',
+        'Are you sure you want to remove this subject from your class? This action cannot be undone.',
+        async () => {
+            try {
+                const idToken = await currentUser.getIdToken();
+                
+                const response = await fetch('/api/teachers/remove-subject', {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        subjectId,
+                        streamId,
+                        semester
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('success', 'Subject removed successfully');
+                    // Reload profile to refresh the list
+                    await loadTeacherProfile(currentUser);
+                } else {
+                    throw new Error('Failed to remove subject');
+                }
+                
+            } catch (error) {
+                console.error('Error removing subject:', error);
+                showAlert('error', 'Failed to remove subject. Please try again.');
+            }
+        }
+    );
+}
+
+function openSubjectDashboard(subjectId) {
+    // Navigate to subject-specific dashboard
+    window.location.href = `/subject-dashboard.html?subjectId=${subjectId}`;
+}
+
+function openAddSubjectModal() {
+    document.getElementById('addSubjectModal').classList.remove('hidden');
+    // TODO: Load streams and initialize form
+}
+
+function closeAddSubjectModal() {
+    document.getElementById('addSubjectModal').classList.add('hidden');
+}
+
+// Utility functions
+function showAlert(type, message) {
+    const alertDiv = document.getElementById('alertMessage');
+    const alertText = document.getElementById('alertText');
+    
+    // Set alert style based on type
+    let bgColor, textColor, icon;
+    switch (type) {
+        case 'success':
+            bgColor = 'bg-green-100 border-green-400';
+            textColor = 'text-green-700';
+            icon = 'fas fa-check-circle';
+            break;
+        case 'error':
+            bgColor = 'bg-red-100 border-red-400';
+            textColor = 'text-red-700';
+            icon = 'fas fa-exclamation-circle';
+            break;
+        case 'info':
+        default:
+            bgColor = 'bg-blue-100 border-blue-400';
+            textColor = 'text-blue-700';
+            icon = 'fas fa-info-circle';
+    }
+    
+    alertDiv.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm border ${bgColor} ${textColor}`;
+    alertText.innerHTML = `<i class="${icon} mr-2"></i>${message}`;
+    
+    alertDiv.classList.remove('hidden');
+    
+    // Auto hide after 5 seconds for non-error messages
+    if (type !== 'error') {
+        setTimeout(() => {
+            hideAlert();
+        }, 5000);
+    }
+}
+
+function hideAlert() {
+    document.getElementById('alertMessage').classList.add('hidden');
+}
+
+function showConfirmation(title, message, onConfirm) {
+    const modal = document.getElementById('confirmationModal');
+    const content = document.getElementById('confirmationModalContent');
+    const messageEl = document.getElementById('confirmationMessage');
+    const confirmBtn = document.getElementById('confirmationConfirm');
+    const cancelBtn = document.getElementById('confirmationCancel');
+    
+    messageEl.textContent = message;
+    
+    // Show modal with animation
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        content.classList.remove('scale-95', 'opacity-0');
+        content.classList.add('scale-100', 'opacity-100');
+    }, 10);
+    
+    // Handle confirm
+    const handleConfirm = () => {
+        hideConfirmation();
+        onConfirm();
+    };
+    
+    // Handle cancel
+    const handleCancel = () => {
+        hideConfirmation();
+    };
+    
+    // Remove existing listeners and add new ones
+    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+    cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+    
+    document.getElementById('confirmationConfirm').addEventListener('click', handleConfirm);
+    document.getElementById('confirmationCancel').addEventListener('click', handleCancel);
+    
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) handleCancel();
+    });
+}
+
+function hideConfirmation() {
+    const modal = document.getElementById('confirmationModal');
+    const content = document.getElementById('confirmationModalContent');
+    
+    content.classList.remove('scale-100', 'opacity-100');
+    content.classList.add('scale-95', 'opacity-0');
+    
+    setTimeout(() => {
+        modal.classList.add('hidden');
+    }, 200);
+}
+
+// Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.dashboardManager = new DashboardManager();
+    console.log('📊 Dashboard initializing...');
+    
+    // Check if we're already authenticated (fallback)
+    const teacherData = localStorage.getItem('teacherData');
+    if (teacherData) {
+        console.log('📱 Found stored teacher data');
+    }
 });
+
+console.log('✅ Dashboard script loaded');

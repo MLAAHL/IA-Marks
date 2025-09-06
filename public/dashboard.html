@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IA-MARKS MANAGEMENT - Teacher Dashboard</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK v9 -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+        import { getAuth, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+        
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDmvzNuE-szbAkFjeEjCNFJK-65sC0_IfE",
+            authDomain: "smart-attendance-a9ab4.firebaseapp.com",
+            projectId: "smart-attendance-a9ab4",
+            storageBucket: "smart-attendance-a9ab4.firebasestorage.app",
+            messagingSenderId: "447867381654",
+            appId: "1:447867381654:web:e27e6cceb8c63c0c799fb7",
+            measurementId: "G-19HPME0K12"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        
+        let currentUser = null;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeDashboard();
+        });
+        
+        function initializeDashboard() {
+            // Listen for authentication state changes
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    currentUser = user;
+                    console.log('✅ User authenticated:', user.email);
+                    
+                    // Display user information
+                    displayUserInfo(user);
+                    
+                    // Load teacher profile data from database ONLY
+                    await loadTeacherProfile(user);
+                    
+                    // Initialize UI interactions
+                    initializeUIHandlers();
+                    
+                } else {
+                    console.log('❌ No user authenticated, redirecting to login');
+                    window.location.href = '/login.html';
+                }
+            });
+        }
+        
+        function displayUserInfo(user) {
+            const email = user.email;
+            const displayName = user.displayName || email.split('@')[0];
+            
+            // Update email displays
+            document.getElementById('userEmail').textContent = email;
+            document.getElementById('dropdownUserEmail').textContent = email;
+            
+            // Update profile button with user initials or photo
+            const profileBtn = document.getElementById('profileBtn');
+            if (user.photoURL) {
+                profileBtn.innerHTML = `<img src="${user.photoURL}" alt="Profile" class="w-8 h-8 rounded-lg object-cover">`;
+            } else {
+                const initials = displayName.substring(0, 2).toUpperCase();
+                profileBtn.innerHTML = `<span class="text-sm font-bold">${initials}</span>`;
+            }
+            
+            profileBtn.setAttribute('title', `${displayName} (${email})`);
+        }
+        
+        async function loadTeacherProfile(user) {
+            try {
+                showAlert('info', 'Loading your profile from database...');
+                
+                // Get Firebase ID token
+                const idToken = await user.getIdToken();
+                
+                // Fetch teacher profile from database API
+                const response = await fetch('/api/teachers/profile', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    const teacherData = data.data;
+                    console.log('✅ Teacher profile loaded from database:', teacherData);
+                    
+                    // Update subject count
+                    const subjectsCount = teacherData.createdSubjects?.length || 0;
+                    document.getElementById('subjectCount').textContent = subjectsCount;
+                    
+                    // Show appropriate section based on subjects from database
+                    if (subjectsCount > 0) {
+                        showSubjectsList(teacherData.createdSubjects);
+                    } else {
+                        showEmptyState();
+                    }
+                    
+                    // Store teacher data
+                    localStorage.setItem('teacherProfile', JSON.stringify(teacherData));
+                    
+                    hideAlert();
+                    
+                } else {
+                    throw new Error(data.error || 'Failed to load profile from database');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error loading teacher profile from database:', error);
+                showAlert('error', `Failed to load profile: ${error.message}`);
+                
+                // Show empty state on error (NO DEMO DATA)
+                showEmptyStateWithError();
+            }
+        }
+        
+        function showSubjectsList(subjects) {
+            // Hide empty state and show subjects list
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('subjectsList').classList.remove('hidden');
+            
+            // Render subjects from database
+            renderSubjects(subjects);
+        }
+        
+        function showEmptyState() {
+            // Show empty state and hide subjects list
+            document.getElementById('emptyState').classList.remove('hidden');
+            document.getElementById('subjectsList').classList.add('hidden');
+        }
+        
+        function showEmptyStateWithError() {
+            // Show empty state with error message (NO DEMO DATA)
+            document.getElementById('emptyState').classList.remove('hidden');
+            document.getElementById('subjectsList').classList.add('hidden');
+            
+            // Update empty state message to show error
+            const emptyStateContent = document.querySelector('#emptyState .max-w-md');
+            emptyStateContent.innerHTML = `
+                <h3 class="text-2xl font-semibold text-gray-900 mb-4">Unable to Load Subjects</h3>
+                <p class="text-gray-600 mb-8">Failed to fetch your subjects from database. Please check your connection and try again.</p>
+                <button onclick="window.location.reload()" class="inline-flex items-center px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-medium rounded-2xl transition-all duration-200">
+                    <i class="fas fa-refresh mr-3"></i>
+                    Retry Loading
+                </button>
+            `;
+        }
+        
+        function renderSubjects(subjects) {
+            const subjectsGrid = document.getElementById('subjectsGrid');
+            
+            if (!subjects || subjects.length === 0) {
+                subjectsGrid.innerHTML = '<p class="text-gray-500 text-center py-8">No subjects found in database</p>';
+                return;
+            }
+            
+            // Clear existing content
+            subjectsGrid.innerHTML = '';
+            
+            // Create subject cards from database data
+            subjects.forEach((subject, index) => {
+                const subjectCard = createSubjectCard(subject, index);
+                subjectsGrid.appendChild(subjectCard);
+            });
+        }
+        
+        function createSubjectCard(subject, index) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200';
+            
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <div class="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center">
+                        <i class="fas fa-book text-white text-lg"></i>
+                    </div>
+                    <div class="relative">
+                        <button class="text-gray-400 hover:text-gray-600 transition-colors" onclick="toggleSubjectMenu(${index})">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div id="subjectMenu${index}" class="hidden absolute right-0 mt-2 w-32 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-10">
+                            <button onclick="removeSubject('${subject.subjectId}', '${subject.streamId}', ${subject.semester})" class="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
+                                <i class="fas fa-trash mr-2"></i>Remove
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-1">${subject.subjectName}</h3>
+                    <div class="text-sm text-gray-500 space-y-1">
+                        <p><i class="fas fa-graduation-cap mr-2 text-primary"></i>${subject.streamName}</p>
+                        <p><i class="fas fa-calendar-alt mr-2 text-primary"></i>${subject.semesterName}</p>
+                    </div>
+                </div>
+                
+                <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+                    <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Active</span>
+                    <button onclick="openSubjectDashboard('${subject.subjectId}')" class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
+                        Open Dashboard →
+                    </button>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function initializeUIHandlers() {
+            // Profile dropdown toggle
+            const profileBtn = document.getElementById('profileBtn');
+            const profileDropdown = document.getElementById('profileDropdown');
+            
+            profileBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                profileDropdown.classList.toggle('hidden');
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!profileDropdown.contains(e.target) && !profileBtn.contains(e.target)) {
+                    profileDropdown.classList.add('hidden');
+                }
+            });
+            
+            // Logout functionality
+            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+            
+            // Add subject buttons
+            document.getElementById('addFirstSubjectBtn').addEventListener('click', () => {
+                alert('Add subject functionality - connect to your subject selection page');
+            });
+            
+            if (document.getElementById('addSubjectBtn')) {
+                document.getElementById('addSubjectBtn').addEventListener('click', () => {
+                    alert('Add subject functionality - connect to your subject selection page');
+                });
+            }
+        }
+        
+        async function handleLogout() {
+            try {
+                showAlert('info', 'Signing out...');
+                
+                // Clear stored data
+                localStorage.removeItem('teacherProfile');
+                localStorage.removeItem('teacherData');
+                
+                // Sign out from Firebase
+                await signOut(auth);
+                
+                console.log('✅ User signed out successfully');
+                
+                // Redirect to login
+                window.location.href = '/login.html';
+                
+            } catch (error) {
+                console.error('❌ Logout error:', error);
+                showAlert('error', 'Failed to sign out. Please try again.');
+            }
+        }
+        
+        // Global functions for subject management
+        window.toggleSubjectMenu = function(index) {
+            const menu = document.getElementById(`subjectMenu${index}`);
+            
+            // Close all other menus
+            document.querySelectorAll('[id^="subjectMenu"]').forEach(m => {
+                if (m !== menu) m.classList.add('hidden');
+            });
+            
+            menu.classList.toggle('hidden');
+        }
+        
+        window.removeSubject = async function(subjectId, streamId, semester) {
+            if (!confirm('Are you sure you want to remove this subject?')) {
+                return;
+            }
+            
+            try {
+                const idToken = await currentUser.getIdToken();
+                
+                const response = await fetch('/api/teachers/remove-subject', {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        subjectId,
+                        streamId,
+                        semester
+                    })
+                });
+                
+                if (response.ok) {
+                    showAlert('success', 'Subject removed successfully');
+                    // Reload profile to refresh the list from database
+                    await loadTeacherProfile(currentUser);
+                } else {
+                    throw new Error('Failed to remove subject');
+                }
+                
+            } catch (error) {
+                console.error('Error removing subject:', error);
+                showAlert('error', 'Failed to remove subject. Please try again.');
+            }
+        }
+        
+        window.openSubjectDashboard = function(subjectId) {
+            // Navigate to subject-specific dashboard
+            window.location.href = `/subject-dashboard.html?subjectId=${subjectId}`;
+        }
+        
+        // Utility functions
+        function showAlert(type, message) {
+            const alertDiv = document.getElementById('alertMessage');
+            const alertText = document.getElementById('alertText');
+            
+            // Set alert style based on type
+            let bgColor, textColor, icon;
+            switch (type) {
+                case 'success':
+                    bgColor = 'bg-green-100 border-green-400';
+                    textColor = 'text-green-700';
+                    icon = 'fas fa-check-circle';
+                    break;
+                case 'error':
+                    bgColor = 'bg-red-100 border-red-400';
+                    textColor = 'text-red-700';
+                    icon = 'fas fa-exclamation-circle';
+                    break;
+                case 'info':
+                default:
+                    bgColor = 'bg-blue-100 border-blue-400';
+                    textColor = 'text-blue-700';
+                    icon = 'fas fa-info-circle';
+            }
+            
+            alertDiv.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm border ${bgColor} ${textColor}`;
+            alertText.innerHTML = `<i class="${icon} mr-2"></i>${message}`;
+            
+            alertDiv.classList.remove('hidden');
+            
+            // Auto hide after 5 seconds for non-error messages
+            if (type !== 'error') {
+                setTimeout(() => {
+                    hideAlert();
+                }, 5000);
+            }
+        }
+        
+        function hideAlert() {
+            document.getElementById('alertMessage').classList.add('hidden');
+        }
+    </script>
+    
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#6366f1',
+                        'primary-dark': '#4f46e5',
+                        'accent': '#8b5cf6',
+                        'light-gray': '#f8fafc',
+                        'text-gray': '#64748b'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="min-h-screen bg-light-gray">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-100">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Left side - Logo and Title -->
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
+                        <i class="fas fa-chart-line text-white text-lg"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-semibold text-gray-900">IA-MARKS MANAGEMENT</h1>
+                        <p class="text-sm text-text-gray">Teacher Panel</p>
+                    </div>
+                </div>
+
+                <!-- Right side - User Email and Profile -->
+                <div class="flex items-center space-x-4">
+                    <!-- User Email -->
+                    <div class="text-right">
+                        <p id="userEmail" class="text-sm font-medium text-gray-900">Loading...</p>
+                    </div>
+                    
+                    <!-- Profile Dropdown -->
+                    <div class="relative">
+                        <button id="profileBtn" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-xl flex items-center justify-center text-white font-medium hover:shadow-lg transition-all duration-200">
+                            <i class="fas fa-user"></i>
+                        </button>
+                        
+                        <!-- Dropdown Menu -->
+                        <div id="profileDropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 py-2 z-10">
+                            <div class="px-4 py-2 border-b border-gray-100">
+                                <p id="dropdownUserEmail" class="text-sm text-gray-600 truncate">Loading...</p>
+                            </div>
+                            <div class="border-t border-gray-100 mt-2 pt-2">
+                                <button id="logoutBtn" class="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                                    <i class="fas fa-sign-out-alt mr-3"></i>
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Subject Status Card -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Subject Status</h2>
+                    <p class="text-sm text-text-gray">From Database</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mb-2">
+                        <span id="subjectCount" class="text-2xl font-bold text-white">0</span>
+                    </div>
+                    <p class="text-sm text-text-gray">Subjects</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State / Add First Subject -->
+        <div id="emptyState" class="text-center py-16">
+            <!-- Plus Icon -->
+            <div class="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-8 hover:bg-gray-200 transition-colors cursor-pointer">
+                <i class="fas fa-plus text-3xl text-gray-400"></i>
+            </div>
+            
+            <!-- Content -->
+            <div class="max-w-md mx-auto">
+                <h3 class="text-2xl font-semibold text-gray-900 mb-4">Start Your Subject</h3>
+                <p class="text-text-gray mb-8">Add your first subject to begin managing IA marks</p>
+                
+                <!-- Add First Subject Button -->
+                <button id="addFirstSubjectBtn" class="inline-flex items-center px-8 py-4 bg-primary hover:bg-primary-dark text-white font-medium rounded-2xl transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl">
+                    <i class="fas fa-plus mr-3"></i>
+                    Add First Subject
+                </button>
+            </div>
+        </div>
+
+        <!-- Subjects List (Hidden initially, will show when subjects are loaded from database) -->
+        <div id="subjectsList" class="hidden">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h3 class="text-xl font-semibold text-gray-900">Your Classes</h3>
+                    <p class="text-sm text-text-gray">Loaded from database</p>
+                </div>
+                <button id="addSubjectBtn" class="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition-colors">
+                    <i class="fas fa-plus mr-2"></i>
+                    Add More
+                </button>
+            </div>
+            
+            <!-- Subjects Grid -->
+            <div id="subjectsGrid" class="space-y-4">
+                <!-- Subject cards will be dynamically loaded from database -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Alert Message -->
+    <div id="alertMessage" class="hidden fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm">
+        <p id="alertText" class="text-sm font-medium"></p>
+    </div>
+</body>
+</html>

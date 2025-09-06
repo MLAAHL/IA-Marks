@@ -1,224 +1,208 @@
-/**
- * Firebase Authentication Handler for IA-MARKS MANAGEMENT
- * Handles all Firebase authentication operations
- */
+// assets/js/auth.js
+let auth;
+let isFirebaseReady = false;
 
-class FirebaseAuthManager {
-    constructor() {
-        this.auth = null;
-        this.currentUser = null;
-        this.isFirebaseReady = false;
-        
-        this.init();
-    }
+// Wait for Firebase to be ready
+window.addEventListener('firebaseReady', () => {
+    auth = window.auth;
+    isFirebaseReady = true;
+    
+    // Update connection status
+    document.getElementById('connectionStatus').innerHTML = 
+        '<i class="fas fa-circle text-green-500 mr-1"></i>Connected to Firebase';
+    
+    // Enable sign in button
+    document.getElementById('signInBtn').disabled = false;
+    
+    // Check if user is already logged in
+    checkAuthState();
+});
 
-    init() {
-        // Wait for Firebase to be ready
-        window.addEventListener('firebaseReady', () => {
-            this.auth = window.auth;
-            this.isFirebaseReady = true;
-            this.setupAuthStateListener();
-            this.updateConnectionStatus('connected');
-            this.enableLoginForm();
-            console.log('Firebase Auth initialized successfully');
-        });
-
-        // Handle Firebase initialization errors
-        setTimeout(() => {
-            if (!this.isFirebaseReady) {
-                this.updateConnectionStatus('error');
-                console.error('Firebase initialization timeout');
-            }
-        }, 10000);
-    }
-
-    setupAuthStateListener() {
-    window.firebaseAuth.onAuthStateChanged(this.auth, (user) => {
-        // If a logout was initiated in another tab, avoid triggering auto-login behavior here.
-        // Do NOT remove the flag here; let the login page finalize the logout and clear it.
-        if (localStorage.getItem('userLoggedOut') === 'true') {
-            return;
-        }
-
-        this.currentUser = user;
+// Check authentication state
+function checkAuthState() {
+    window.firebaseAuth.onAuthStateChanged(auth, async (user) => {
         if (user) {
             console.log('User is signed in:', user.email);
-            this.handleAuthSuccess(user);
+            await handleUserLogin(user);
         } else {
             console.log('User is signed out');
         }
     });
 }
 
+// Handle successful Firebase login
+async function handleUserLogin(firebaseUser) {
+    try {
+        showLoading(true);
+        
+        // Get Firebase ID token
+        const idToken = await firebaseUser.getIdToken();
+        
+        // Check if teacher exists in database or create new one
+        const response = await fetch('/api/teachers/checkOrCreate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({
+                firebaseUid: firebaseUser.uid,
+                email: firebaseUser.email,
+                name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+                photoURL: firebaseUser.photoURL || '',
+                phoneNumber: firebaseUser.phoneNumber || ''
+            })
+        });
 
-    async signInWithEmail(email, password) {
-        if (!this.isFirebaseReady) {
-            throw new Error('Firebase not initialized');
-        }
-
-        try {
-            // Ensure persistence is set based on whether the user requested 'remember me'.
-            try {
-                const remember = localStorage.getItem('rememberedEmail') !== null;
-                if (window.firebaseAuthPersistence && window.auth) {
-                    const { setPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence } = window.firebaseAuthPersistence;
-                    // If user asked to be remembered use local persistence, otherwise session
-                    await setPersistence(window.auth, remember ? browserLocalPersistence : sessionStorage ? browserSessionPersistence : inMemoryPersistence);
-                }
-            } catch (pErr) {
-                // If persistence setting fails, continue with sign-in; we'll clear on logout.
-                console.log('Could not set persistence (continuing):', pErr);
-            }
-
-            const userCredential = await window.firebaseAuth.signInWithEmailAndPassword(this.auth, email, password);
-            const user = userCredential.user;
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert('success', result.message);
             
-            console.log('Login successful:', user.email);
-            return {
-                success: true,
-                user: {
-                    uid: user.uid,
-                    email: user.email,
-                    displayName: user.displayName,
-                    emailVerified: user.emailVerified
+            // Store teacher info in localStorage
+            localStorage.setItem('teacherData', JSON.stringify({
+                mongoId: result.data._id,
+                firebaseUid: result.data.firebaseUid,
+                name: result.data.name,
+                email: result.data.email,
+                hasSelectedSubjects: result.data.createdSubjects.length > 0,
+                loginTime: Date.now()
+            }));
+            
+            // Redirect based on whether teacher has selected subjects
+            setTimeout(() => {
+                if (result.data.createdSubjects.length > 0) {
+                    window.location.href = '/dashboard.html';
+                } else {
+                    window.location.href = '/subject-selection.html';
                 }
-            };
-        } catch (error) {
-            console.error('Firebase Auth Error:', error);
-            return {
-                success: false,
-                error: this.getReadableErrorMessage(error.code),
-                errorCode: error.code
-            };
+            }, 1500);
+            
+        } else {
+            showAlert('error', 'Failed to store user data: ' + result.error);
         }
+        
+    } catch (error) {
+        console.error('Error handling login:', error);
+        showAlert('error', 'Login processing failed. Please try again.');
+    } finally {
+        showLoading(false);
     }
+}
 
-    async signOut() {
-        if (!this.isFirebaseReady) {
+// Handle form submission
+document.addEventListener('DOMContentLoaded', () => {
+    const loginForm = document.getElementById('loginForm');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const togglePassword = document.getElementById('togglePassword');
+    const keepSignedIn = document.getElementById('keepSignedIn');
+
+    // Toggle password visibility
+    togglePassword.addEventListener('click', () => {
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        togglePassword.innerHTML = type === 'password' 
+            ? '<i class="fas fa-eye"></i>' 
+            : '<i class="fas fa-eye-slash"></i>';
+    });
+
+    // Handle form submission
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (!isFirebaseReady) {
+            showAlert('error', 'Firebase is not ready. Please wait and try again.');
             return;
         }
-
-        try {
-            // Before signOut, set persistence to in-memory to avoid persistent session on next load
-            try {
-                if (window.firebaseAuthPersistence && window.auth) {
-                    const { setPersistence, inMemoryPersistence } = window.firebaseAuthPersistence;
-                    await setPersistence(window.auth, inMemoryPersistence);
-                }
-            } catch (pErr) {
-                console.log('Could not set in-memory persistence before signOut:', pErr);
-            }
-
-            await window.firebaseAuth.signOut(this.auth);
-            console.log('User signed out successfully');
-            return { success: true };
-        } catch (error) {
-            console.error('Sign out error:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    async sendPasswordResetEmail(email) {
-        if (!this.isFirebaseReady) {
-            throw new Error('Firebase not initialized');
-        }
-
-        try {
-            await this.auth.sendPasswordResetEmail(email);
-            return { success: true };
-        } catch (error) {
-            console.error('Password reset error:', error);
-            return { success: false, error: this.getReadableErrorMessage(error.code) };
-        }
-    }
-
-    getReadableErrorMessage(errorCode) {
-        const errorMessages = {
-            'auth/user-not-found': 'No account found with this email address.',
-            'auth/wrong-password': 'Incorrect password. Please try again.',
-            'auth/invalid-email': 'Please enter a valid email address.',
-            'auth/user-disabled': 'This account has been disabled. Contact administrator.',
-            'auth/too-many-requests': 'Too many failed attempts. Please try again later.',
-            'auth/network-request-failed': 'Network error. Please check your connection.',
-            'auth/invalid-credential': 'Invalid email or password. Please check your credentials.',
-            'auth/operation-not-allowed': 'Email/password login is not enabled.',
-            'auth/weak-password': 'Password should be at least 6 characters long.',
-            'auth/email-already-in-use': 'An account already exists with this email.'
-        };
-
-        return errorMessages[errorCode] || 'An unexpected error occurred. Please try again.';
-    }
-
-    handleAuthSuccess(user) {
-        // Store user session
-        const userSession = {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            emailVerified: user.emailVerified,
-            lastLoginAt: new Date().toISOString()
-        };
-
-        localStorage.setItem('userSession', JSON.stringify(userSession));
         
-        // Redirect to dashboard
-        this.redirectToDashboard();
-    }
+        const email = emailInput.value.trim();
+        const password = passwordInput.value;
+        
+        if (!email || !password) {
+            showAlert('error', 'Please enter both email and password.');
+            return;
+        }
+        
+        try {
+            showLoading(true);
+            
+            // Set persistence based on "Keep me signed in" checkbox
+            const persistence = keepSignedIn.checked 
+                ? window.firebaseAuthPersistence.browserLocalPersistence 
+                : window.firebaseAuthPersistence.browserSessionPersistence;
+                
+            await window.firebaseAuthPersistence.setPersistence(auth, persistence);
+            
+            // Sign in with Firebase
+            const userCredential = await window.firebaseAuth.signInWithEmailAndPassword(auth, email, password);
+            console.log('Firebase login successful:', userCredential.user.email);
+            
+            // handleUserLogin will be called automatically by onAuthStateChanged
+            
+        } catch (error) {
+            console.error('Login error:', error);
+            showLoading(false);
+            
+            let errorMessage = 'Login failed. Please try again.';
+            
+            switch (error.code) {
+                case 'auth/user-not-found':
+                    errorMessage = 'No account found with this email address.';
+                    break;
+                case 'auth/wrong-password':
+                    errorMessage = 'Incorrect password. Please try again.';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Please enter a valid email address.';
+                    break;
+                case 'auth/too-many-requests':
+                    errorMessage = 'Too many failed attempts. Please try again later.';
+                    break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Network error. Please check your connection.';
+                    break;
+                default:
+                    errorMessage = error.message || 'Login failed. Please try again.';
+            }
+            
+            showAlert('error', errorMessage);
+        }
+    });
+});
 
-    redirectToDashboard() {
-    // Updated redirect to dashboard
-    const dashboardUrl = '/dashboard.html';
+// Utility functions
+function showLoading(show) {
+    const btnText = document.getElementById('btnText');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const signInBtn = document.getElementById('signInBtn');
     
-    // Show success message before redirect
-    if (window.loginManager) {
-        window.loginManager.showAlert('Login successful! Redirecting...', 'success');
+    if (show) {
+        btnText.textContent = 'Signing In...';
+        loadingSpinner.classList.remove('hidden');
+        signInBtn.disabled = true;
+    } else {
+        btnText.textContent = 'Sign In';
+        loadingSpinner.classList.add('hidden');
+        signInBtn.disabled = false;
     }
+}
+
+function showAlert(type, message) {
+    const alertDiv = document.getElementById('alertMessage');
+    const alertText = document.getElementById('alertText');
     
+    alertDiv.className = `mb-4 p-3 rounded-lg alert-message ${
+        type === 'success' 
+            ? 'bg-green-100 border border-green-400 text-green-700' 
+            : 'bg-red-100 border border-red-400 text-red-700'
+    }`;
+    
+    alertText.textContent = message;
+    alertDiv.classList.remove('hidden');
+    
+    // Auto hide after 5 seconds
     setTimeout(() => {
-        window.location.href = dashboardUrl;
-    }, 1500);
+        alertDiv.classList.add('hidden');
+    }, 5000);
 }
-
-
-    updateConnectionStatus(status) {
-        const statusElement = document.getElementById('connectionStatus');
-        if (!statusElement) return;
-
-        switch (status) {
-            case 'connecting':
-                statusElement.innerHTML = '<i class="fas fa-circle animate-pulse text-yellow-500 mr-1"></i>Connecting to Firebase...';
-                statusElement.className = 'mb-4 p-2 rounded text-center text-xs bg-yellow-50 text-yellow-700';
-                break;
-            case 'connected':
-                statusElement.innerHTML = '<i class="fas fa-check-circle text-green-500 mr-1"></i>Connected securely';
-                statusElement.className = 'mb-4 p-2 rounded text-center text-xs bg-green-50 text-green-700';
-                setTimeout(() => {
-                    statusElement.style.display = 'none';
-                }, 3000);
-                break;
-            case 'error':
-                statusElement.innerHTML = '<i class="fas fa-exclamation-triangle text-red-500 mr-1"></i>Connection failed';
-                statusElement.className = 'mb-4 p-2 rounded text-center text-xs bg-red-50 text-red-700';
-                break;
-        }
-    }
-
-    enableLoginForm() {
-        const signInBtn = document.getElementById('signInBtn');
-        if (signInBtn) {
-            signInBtn.disabled = false;
-            signInBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-        }
-    }
-
-    getCurrentUser() {
-        return this.currentUser;
-    }
-
-    isAuthenticated() {
-        return this.currentUser !== null;
-    }
-}
-
-// Initialize Firebase Auth Manager
-window.firebaseAuthManager = new FirebaseAuthManager();

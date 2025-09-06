@@ -1,249 +1,157 @@
+// routes/teacherRoutes.js
 const express = require('express');
 const router = express.Router();
-const mongoose = require('mongoose');
 const Teacher = require('../models/Teacher');
-const Subject = require('../models/Subject');
-const Stream = require('../models/Stream');
+const admin = require('firebase-admin');
 
-// POST - Add subject to teacher's createdSubjects
-router.post('/add-subject', async (req, res) => {
+// Initialize Firebase Admin SDK (add this to your main server file)
+const serviceAccount = require('../config/firebase-service-account.json');
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
+// Middleware to verify Firebase token
+async function verifyFirebaseToken(req, res, next) {
     try {
-        const { teacherId, streamId, semester, subjectId } = req.body;
-
-        // Validate all required fields
-        if (!teacherId || !streamId || !semester || !subjectId) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Missing required fields' 
-            });
-        }
-
-        // Validate teacherId is not null or empty
-        if (teacherId === 'null' || teacherId === 'undefined' || teacherId.trim() === '') {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid teacher ID. Please ensure you are properly logged in.' 
-            });
-        }
-
-        console.log('🔍 Looking for teacher with ID:', teacherId);
-
-        // Find teacher by Firebase UID
-        let teacher = await Teacher.findById(teacherId);
+        const authHeader = req.headers.authorization;
         
-        if (!teacher) {
-            console.log('👤 Creating new teacher record for:', teacherId);
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({
+                success: false,
+                error: 'No authorization token provided'
+            });
+        }
+        
+        const idToken = authHeader.split('Bearer ')[1];
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        
+        req.firebaseUser = decodedToken;
+        next();
+        
+    } catch (error) {
+        console.error('Token verification failed:', error);
+        return res.status(401).json({
+            success: false,
+            error: 'Invalid or expired token'
+        });
+    }
+}
+
+// Route to check if teacher exists and create if first time
+router.post('/checkOrCreate', verifyFirebaseToken, async (req, res) => {
+    try {
+        const { firebaseUid, email, name, photoURL, phoneNumber } = req.body;
+        
+        // Validate required fields
+        if (!firebaseUid || !email) {
+            return res.status(400).json({
+                success: false,
+                error: 'Firebase UID and email are required'
+            });
+        }
+        
+        console.log(`🔍 Checking teacher with Firebase UID: ${firebaseUid}`);
+        
+        // Check if teacher already exists
+        let teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        
+        if (teacher) {
+            // Teacher exists - update last login
+            teacher.lastLogin = new Date();
+            await teacher.save();
             
-            // Create teacher with proper Firebase UID
-            teacher = new Teacher({
-                _id: teacherId, // Use Firebase UID as _id
-                name: 'Teacher',
-                email: `${teacherId}@example.com`, // Temporary email
-                password: 'hashed_password',
-                createdSubjects: []
+            console.log(`✅ Existing teacher logged in: ${teacher.email}`);
+            
+            return res.json({
+                success: true,
+                message: `Welcome back, ${teacher.name}!`,
+                isNewUser: false,
+                data: {
+                    _id: teacher._id,
+                    firebaseUid: teacher.firebaseUid,
+                    name: teacher.name,
+                    email: teacher.email,
+                    photoURL: teacher.photoURL,
+                    createdSubjects: teacher.createdSubjects,
+                    lastLogin: teacher.lastLogin,
+                    createdAt: teacher.createdAt
+                }
+            });
+        } else {
+            // First time login - create new teacher
+            const newTeacher = new Teacher({
+                firebaseUid: firebaseUid,
+                name: name || email.split('@')[0],
+                email: email,
+                displayName: name,
+                photoURL: photoURL || '',
+                phoneNumber: phoneNumber || '',
+                password: '', // Empty since Firebase handles auth
+                createdSubjects: [],
+                profileCompleted: false,
+                isActive: true,
+                role: 'teacher',
+                lastLogin: new Date()
+            });
+            
+            await newTeacher.save();
+            
+            console.log(`🎉 New teacher created: ${newTeacher.email}`);
+            
+            return res.json({
+                success: true,
+                message: `Welcome to IA Marks Management, ${newTeacher.name}!`,
+                isNewUser: true,
+                data: {
+                    _id: newTeacher._id,
+                    firebaseUid: newTeacher.firebaseUid,
+                    name: newTeacher.name,
+                    email: newTeacher.email,
+                    photoURL: newTeacher.photoURL,
+                    createdSubjects: newTeacher.createdSubjects,
+                    lastLogin: newTeacher.lastLogin,
+                    createdAt: newTeacher.createdAt
+                }
             });
         }
-
-        // Check for duplicates
-        const existingSubject = teacher.createdSubjects.find(cs => 
-            cs.subjectId.toString() === subjectId && 
-            cs.streamId.toString() === streamId && 
-            cs.semester === parseInt(semester)
-        );
-
-        if (existingSubject) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Subject already added to your queue' 
-            });
-        }
-
-        // Add subject reference
-        teacher.createdSubjects.push({
-            subjectId: new mongoose.Types.ObjectId(subjectId),
-            streamId: new mongoose.Types.ObjectId(streamId),
-            semester: parseInt(semester)
-        });
-
-        const savedTeacher = await teacher.save();
         
-        console.log('✅ Subject added to teacher:', teacherId);
-        console.log('📝 Total subjects:', savedTeacher.createdSubjects.length);
-
-        res.json({
-            success: true,
-            message: 'Subject added successfully',
-            totalSubjects: savedTeacher.createdSubjects.length
-        });
-
     } catch (error) {
-        console.error('❌ Error adding subject:', error);
+        console.error('❌ Error in checkOrCreate:', error);
         
-        // Handle specific MongoDB errors
-        if (error.code === 11000) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Duplicate key error. Please try logging out and logging back in.' 
-            });
-        }
-        
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error',
-            error: error.message 
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to process login. Please try again.',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
 
-// GET - Fetch teacher's created subjects
-router.get('/:teacherId/subjects', async (req, res) => {
+// Route to get teacher profile
+router.get('/profile', verifyFirebaseToken, async (req, res) => {
     try {
-        const teacherId = req.params.teacherId;
-        
-        console.log('🔍 Fetching subjects for teacher:', teacherId);
-
-        const teacher = await Teacher.findById(teacherId)
-            .populate({
-                path: 'createdSubjects.subjectId',
-                select: 'name'
-            })
-            .populate({
-                path: 'createdSubjects.streamId',
-                select: 'name'
-            });
-
-        if (!teacher) {
-            console.log('⚠️ Teacher not found:', teacherId);
-            return res.json({ 
-                success: true, 
-                subjects: [],
-                totalSubjects: 0,
-                message: 'No teacher found'
-            });
-        }
-
-        console.log('📚 Found teacher with', teacher.createdSubjects.length, 'subjects');
-
-        // Filter valid subjects
-        const validSubjects = teacher.createdSubjects.filter(cs => 
-            cs.subjectId && cs.streamId
-        );
-
-        // Format subjects for frontend
-        const formattedSubjects = validSubjects.map((cs, index) => ({
-            id: cs.subjectId._id.toString(),
-            serialNumber: index + 1,
-            name: cs.subjectId.name.toUpperCase(),
-            code: `${cs.streamId.name}${cs.semester}01`,
-            stream: cs.streamId.name,
-            streamColor: getStreamColor(cs.streamId.name),
-            streamIcon: getStreamIcon(cs.streamId.name),
-            semester: cs.semester,
-            addedTime: new Date().toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            })
-        }));
-
-        res.json({
-            success: true,
-            subjects: formattedSubjects,
-            totalSubjects: formattedSubjects.length
+        const teacher = await Teacher.findOne({ 
+            firebaseUid: req.firebaseUser.uid 
         });
-
-    } catch (error) {
-        console.error('❌ Error fetching subjects:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error',
-            error: error.message 
-        });
-    }
-});
-
-// DELETE - Remove subject from teacher's createdSubjects
-router.delete('/:teacherId/subjects/:subjectId', async (req, res) => {
-    try {
-        const { teacherId, subjectId } = req.params;
         
-        console.log('🗑️ Removing subject:', subjectId, 'for teacher:', teacherId);
-
-        // Find teacher by Firebase UID
-        const teacher = await Teacher.findById(teacherId);
         if (!teacher) {
-            console.log('❌ Teacher not found:', teacherId);
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Teacher not found' 
-            });
-        }
-
-        console.log('📚 Teacher has', teacher.createdSubjects.length, 'subjects before removal');
-
-        // Find the subject in createdSubjects array
-        const subjectIndex = teacher.createdSubjects.findIndex(cs => 
-            cs.subjectId.toString() === subjectId
-        );
-
-        if (subjectIndex === -1) {
-            console.log('❌ Subject not found in queue:', subjectId);
             return res.status(404).json({
                 success: false,
-                message: 'Subject not found in queue'
+                error: 'Teacher not found'
             });
         }
-
-        // Remove the subject from array
-        teacher.createdSubjects.splice(subjectIndex, 1);
         
-        // Mark as modified (important for Mongoose arrays)
-        teacher.markModified('createdSubjects');
-
-        // Save the updated teacher document
-        await teacher.save();
-        
-        console.log('✅ Subject removed successfully');
-        console.log('📚 Teacher now has', teacher.createdSubjects.length, 'subjects');
-
         res.json({
             success: true,
-            message: 'Subject removed successfully',
-            remainingSubjects: teacher.createdSubjects.length
+            data: teacher
         });
-
+        
     } catch (error) {
-        console.error('❌ Error removing subject:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error',
-            error: error.message 
+        console.error('Error fetching teacher profile:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch profile'
         });
     }
 });
-
-
-// Helper functions for stream colors and icons
-function getStreamColor(streamName) {
-    const colors = {
-        'BCA': '#8b5cf6',
-        'BBA': '#10b981',
-        'BCom': '#f59e0b',
-        'BDA': '#ec4899',
-        'BCom A and F': '#3b82f6'
-    };
-    return colors[streamName] || '#6366f1';
-}
-
-function getStreamIcon(streamName) {
-    const icons = {
-        'BCA': 'fas fa-laptop-code',
-        'BBA': 'fas fa-chart-line',
-        'BCom': 'fas fa-coins',
-        'BDA': 'fas fa-database',
-        'BCom A and F': 'fas fa-calculator'
-    };
-    return icons[streamName] || 'fas fa-graduation-cap';
-}
 
 module.exports = router;

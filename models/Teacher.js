@@ -6,22 +6,44 @@ const createdSubjectSchema = new mongoose.Schema({
         ref: 'Subject',
         required: true
     },
+    subjectName: {
+        type: String,
+        required: true
+    },
     streamId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Stream',
         required: true
     },
+    streamName: {
+        type: String,
+        required: true
+    },
     semester: {
         type: Number,
+        required: true
+    },
+    semesterName: {
+        type: String,
         required: true
     }
 }, { _id: false });
 
 const teacherSchema = new mongoose.Schema({
+    // MongoDB ObjectId (auto-generated)
     _id: {
-        type: String, // Firebase UID as _id
-        required: true
+        type: mongoose.Schema.Types.ObjectId,
+        auto: true
     },
+    
+    // Firebase UID (separate field)
+    firebaseUid: {
+        type: String,
+        required: true,
+        unique: true,
+        index: true
+    },
+    
     name: {
         type: String,
         required: true
@@ -37,16 +59,20 @@ const teacherSchema = new mongoose.Schema({
     },
     createdSubjects: [createdSubjectSchema]
 }, {
-    timestamps: true,
-    _id: false // Don't auto-generate _id since we're using Firebase UID
+    timestamps: true
 });
 
-// Add validation to ensure _id is not null
+// Add validation for Firebase UID
 teacherSchema.pre('save', function(next) {
-    if (!this._id || this._id === null || this._id === '') {
-        return next(new Error('Teacher _id (Firebase UID) is required and cannot be null'));
+    if (!this.firebaseUid || this.firebaseUid === null || this.firebaseUid === '') {
+        return next(new Error('Firebase UID is required and cannot be null'));
     }
     next();
 });
+
+// Static method to find by Firebase UID
+teacherSchema.statics.findByFirebaseUid = function(firebaseUid) {
+    return this.findOne({ firebaseUid: firebaseUid });
+};
 
 module.exports = mongoose.model('Teacher', teacherSchema);
