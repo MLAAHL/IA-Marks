@@ -56,12 +56,18 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+// Serve subject-dashboard page
+app.get('/subject-dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'subject-dashboard.html'));
 });
 
+// Serve subject-selection page
 app.get('/subject-selection', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'subject-selection.html'));
+});
+
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 // API Status endpoint

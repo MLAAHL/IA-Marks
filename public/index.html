@@ -171,9 +171,9 @@
                     // Redirect based on whether teacher has selected subjects
                     setTimeout(() => {
                         if (result.data.createdSubjects.length > 0) {
-                            window.location.href = '/dashboard.html';
+                            window.location.href = '/dashboard';
                         } else {
-                            window.location.href = '/subject-selection.html';
+                            window.location.href = '/subject-selection';
                         }
                     }, 1500);
                     
@@ -187,7 +187,7 @@
                 
                 // Fallback redirect after 2 seconds
                 setTimeout(() => {
-                    window.location.href = '/dashboard.html';
+                    window.location.href = '/dashboard';
                 }, 2000);
             } finally {
                 showLoading(false);

@@ -39,6 +39,35 @@ const teacherSubjectSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    students: [{
+        uucmsRegNo: {
+            type: String,
+            required: true
+        },
+        name: {
+            type: String,
+            required: true
+        },
+        phone: {
+            type: String,
+            required: true
+        },
+        marks: {
+            C1: {
+                test1: { type: Number, default: null },
+                scaledDown: { type: Number, default: null },
+                activity: { type: Number, default: null },
+                total: { type: Number, default: null }
+            },
+            C2: {
+                test2: { type: Number, default: null },
+                scaledDown: { type: Number, default: null },
+                activity: { type: Number, default: null },
+                total: { type: Number, default: null }
+            },
+            grandTotal: { type: Number, default: null }
+        }
+    }],
     iaTests: [{
         name: String,
         date: Date,

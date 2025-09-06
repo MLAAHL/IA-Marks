@@ -33,29 +33,24 @@
         
         let currentUser = null;
         
+        // Initialize dashboard when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
             initializeDashboard();
         });
         
         function initializeDashboard() {
-            // Listen for authentication state changes
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     currentUser = user;
                     console.log('✅ User authenticated:', user.email);
                     
-                    // Display user information
                     displayUserInfo(user);
-                    
-                    // Load teacher profile data from database ONLY
                     await loadTeacherProfile(user);
-                    
-                    // Initialize UI interactions
                     initializeUIHandlers();
                     
                 } else {
                     console.log('❌ No user authenticated, redirecting to login');
-                    window.location.href = '/login.html';
+                    window.location.href = '/';
                 }
             });
         }
@@ -82,13 +77,13 @@
         
         async function loadTeacherProfile(user) {
             try {
-                showAlert('info', 'Loading your profile from database...');
+                showAlert('info', 'Loading your subjects from database...');
                 
                 // Get Firebase ID token
                 const idToken = await user.getIdToken();
                 
-                // Fetch teacher profile from database API
-                const response = await fetch('/api/teachers/profile', {
+                // Fetch teacher's subjects (TeacherSubject documents)
+                const response = await fetch('/api/teachers/subjects', {
                     method: 'GET',
                     headers: {
                         'Authorization': `Bearer ${idToken}`,
@@ -102,33 +97,32 @@
                 
                 const data = await response.json();
                 
-                if (data.success && data.data) {
-                    const teacherData = data.data;
-                    console.log('✅ Teacher profile loaded from database:', teacherData);
+                if (data.success) {
+                    const subjects = data.data || [];
+                    console.log('✅ Teacher subjects loaded from database:', subjects);
                     
                     // Update subject count
-                    const subjectsCount = teacherData.createdSubjects?.length || 0;
-                    document.getElementById('subjectCount').textContent = subjectsCount;
+                    document.getElementById('subjectCount').textContent = subjects.length;
                     
                     // Show appropriate section based on subjects from database
-                    if (subjectsCount > 0) {
-                        showSubjectsList(teacherData.createdSubjects);
+                    if (subjects.length > 0) {
+                        showSubjectsList(subjects);
                     } else {
                         showEmptyState();
                     }
                     
-                    // Store teacher data
-                    localStorage.setItem('teacherProfile', JSON.stringify(teacherData));
+                    // Store subjects data
+                    localStorage.setItem('teacherSubjects', JSON.stringify(subjects));
                     
                     hideAlert();
                     
                 } else {
-                    throw new Error(data.error || 'Failed to load profile from database');
+                    throw new Error(data.error || 'Failed to load subjects from database');
                 }
                 
             } catch (error) {
-                console.error('❌ Error loading teacher profile from database:', error);
-                showAlert('error', `Failed to load profile: ${error.message}`);
+                console.error('❌ Error loading teacher subjects from database:', error);
+                showAlert('error', `Failed to load subjects: ${error.message}`);
                 
                 // Show empty state on error (NO DEMO DATA)
                 showEmptyStateWithError();
@@ -189,6 +183,9 @@
             const card = document.createElement('div');
             card.className = 'bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200';
             
+            // Create semester name from semesterNumber
+            const semesterName = `Semester ${subject.semesterNumber}`;
+            
             card.innerHTML = `
                 <div class="flex items-center justify-between mb-4">
                     <div class="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center">
@@ -199,7 +196,7 @@
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
                         <div id="subjectMenu${index}" class="hidden absolute right-0 mt-2 w-32 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-10">
-                            <button onclick="removeSubject('${subject.subjectId}', '${subject.streamId}', ${subject.semester})" class="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
+                            <button onclick="removeSubject('${subject.subjectId}', '${subject.streamId}', ${subject.semesterNumber})" class="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
                                 <i class="fas fa-trash mr-2"></i>Remove
                             </button>
                         </div>
@@ -210,13 +207,14 @@
                     <h3 class="text-lg font-semibold text-gray-900 mb-1">${subject.subjectName}</h3>
                     <div class="text-sm text-gray-500 space-y-1">
                         <p><i class="fas fa-graduation-cap mr-2 text-primary"></i>${subject.streamName}</p>
-                        <p><i class="fas fa-calendar-alt mr-2 text-primary"></i>${subject.semesterName}</p>
+                        <p><i class="fas fa-calendar-alt mr-2 text-primary"></i>${semesterName}</p>
+                        <p><i class="fas fa-users mr-2 text-primary"></i>${subject.studentCount || 0} Students</p>
                     </div>
                 </div>
                 
                 <div class="flex items-center justify-between pt-4 border-t border-gray-100">
                     <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Active</span>
-                    <button onclick="openSubjectDashboard('${subject.subjectId}')" class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
+                    <button onclick="openSubjectDashboard('${subject._id}')" class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
                         Open Dashboard →
                     </button>
                 </div>
@@ -247,12 +245,12 @@
             
             // Add subject buttons
             document.getElementById('addFirstSubjectBtn').addEventListener('click', () => {
-                alert('Add subject functionality - connect to your subject selection page');
+                window.location.href = '/subject-selection';
             });
             
             if (document.getElementById('addSubjectBtn')) {
                 document.getElementById('addSubjectBtn').addEventListener('click', () => {
-                    alert('Add subject functionality - connect to your subject selection page');
+                    window.location.href = '/subject-selection';
                 });
             }
         }
@@ -271,7 +269,7 @@
                 console.log('✅ User signed out successfully');
                 
                 // Redirect to login
-                window.location.href = '/login.html';
+                window.location.href = '/';
                 
             } catch (error) {
                 console.error('❌ Logout error:', error);
@@ -328,7 +326,7 @@
         
         window.openSubjectDashboard = function(subjectId) {
             // Navigate to subject-specific dashboard
-            window.location.href = `/subject-dashboard.html?subjectId=${subjectId}`;
+            window.location.href = `/subject-dashboard?subjectId=${subjectId}`;
         }
         
         // Utility functions
@@ -491,7 +489,18 @@
             
             <!-- Subjects Grid -->
             <div id="subjectsGrid" class="space-y-4">
-                <!-- Subject cards will be dynamically loaded from database -->
+                {{ ... }}
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h3 class="text-xl font-semibold text-gray-900">Your Classes</h3>
+                        <p class="text-sm text-text-gray">Loaded from database</p>
+                    </div>
+                    <button onclick="openSubjectDashboard('${subject._id}')" class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                        <i class="fas fa-external-link-alt mr-2"></i>
+                        Open Dashboard
+                    </button>
+                </div>
+                {{ ... }}
             </div>
         </div>
     </main>

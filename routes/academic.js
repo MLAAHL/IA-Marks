@@ -12,10 +12,7 @@ router.get('/streams', async (req, res) => {
         
         console.log(`✅ Found ${streams.length} streams`);
         
-        res.json({
-            success: true,
-            streams: streams
-        });
+        res.json(streams);
     } catch (error) {
         console.error('❌ Error fetching streams:', error);
         res.status(500).json({ 
@@ -66,15 +63,37 @@ router.get('/streams/:streamId/semester/:semester/subjects', async (req, res) =>
 
         console.log(`✅ Found ${subjects.length} subjects`);
 
-        res.json({
-            success: true,
-            subjects: subjects
-        });
+        res.json(subjects);
     } catch (error) {
         console.error('❌ Error fetching subjects:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error fetching subjects',
+            error: error.message 
+        });
+    }
+});
+
+// GET semesters for a specific stream
+router.get('/streams/:streamId/semesters', async (req, res) => {
+    try {
+        const { streamId } = req.params;
+        
+        console.log(`🔍 Fetching semesters for stream ${streamId}`);
+        
+        // Get unique semesters from subjects for this stream
+        const semesters = await Subject.distinct('semester', { streamId: streamId });
+        
+        const semesterObjects = semesters.sort().map(sem => ({ number: sem }));
+        
+        console.log(`✅ Found ${semesterObjects.length} semesters`);
+
+        res.json(semesterObjects);
+    } catch (error) {
+        console.error('❌ Error fetching semesters:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error fetching semesters',
             error: error.message 
         });
     }
