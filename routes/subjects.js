@@ -2,37 +2,50 @@ const express = require('express');
 const router = express.Router();
 
 // Teacher's subjects management
-const TeacherSubject = require('../models/TeacherSubject');
+const Teacher = require('../models/Teacher');
 
 // Add subject to teacher's queue
 router.post('/add-to-queue', async (req, res) => {
     try {
         const { streamId, semesterNumber, subjectId, teacherId } = req.body;
         
+        // Find the teacher
+        const teacher = await Teacher.findById(teacherId);
+        if (!teacher) {
+            return res.status(404).json({ message: 'Teacher not found' });
+        }
+        
         // Check if subject already added
-        const existingSubject = await TeacherSubject.findOne({
-            teacherId,
-            streamId,
-            semesterNumber,
-            subjectId
-        });
+        const existingSubject = teacher.createdSubjects.find(subject => 
+            subject.streamId.toString() === streamId &&
+            subject.semesterNumber === semesterNumber &&
+            subject.subjectId.toString() === subjectId
+        );
         
         if (existingSubject) {
             return res.status(400).json({ message: 'Subject already added to your queue' });
         }
         
-        const teacherSubject = new TeacherSubject({
-            teacherId,
+        // Add subject to teacher's createdSubjects array
+        const newSubject = {
             streamId,
             semesterNumber,
             subjectId,
             status: 'active',
-            createdAt: new Date()
+            studentCount: 0,
+            students: [],
+            iaTests: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+        
+        teacher.createdSubjects.push(newSubject);
+        await teacher.save();
+        
+        res.status(201).json({
+            message: 'Subject added to queue successfully',
+            subject: teacher.createdSubjects[teacher.createdSubjects.length - 1]
         });
-        
-        await teacherSubject.save();
-        res.json({ message: 'Subject added to queue successfully', subject: teacherSubject });
-        
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -41,12 +54,17 @@ router.post('/add-to-queue', async (req, res) => {
 // Get teacher's subjects
 router.get('/teacher/:teacherId', async (req, res) => {
     try {
-        const subjects = await TeacherSubject.find({ 
-            teacherId: req.params.teacherId,
-            status: 'active'
-        }).populate('streamId').populate('subjectId');
+        const teacher = await Teacher.findById(req.params.teacherId)
+            .populate('createdSubjects.streamId')
+            .populate('createdSubjects.subjectId');
         
-        res.json(subjects);
+        if (!teacher) {
+            return res.status(404).json({ message: 'Teacher not found' });
+        }
+        
+        const activeSubjects = teacher.createdSubjects.filter(subject => subject.status === 'active');
+        
+        res.json(activeSubjects);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

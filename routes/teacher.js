@@ -7,7 +7,7 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const Teacher = require('../models/Teacher');
-const TeacherSubject = require('../models/TeacherSubject');
+// const TeacherSubject = require('../models/TeacherSubject'); // Removed - using Teacher model directly
 const admin = require('firebase-admin');
 
 // Initialize Firebase Admin SDK (add this to your main server file)
@@ -239,13 +239,17 @@ router.post('/upload-students/:subjectId', verifyFirebaseToken, upload.single('s
             });
         }
 
-        // Find the teacher's subject
-        const teacherSubject = await TeacherSubject.findOne({
-            _id: subjectId,
-            teacherId: firebaseUid
-        });
+        // Find the teacher and the specific subject
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
 
-        if (!teacherSubject) {
+        const subjectIndex = teacher.createdSubjects.findIndex(subject => subject._id.toString() === subjectId);
+        if (subjectIndex === -1) {
             return res.status(404).json({
                 success: false,
                 error: 'Subject not found or access denied'
@@ -273,7 +277,7 @@ router.post('/upload-students/:subjectId', verifyFirebaseToken, upload.single('s
             }
 
             // Update the subject with student data
-            teacherSubject.students = validatedStudents.map(student => ({
+            teacher.createdSubjects[subjectIndex].students = validatedStudents.map(student => ({
                 uucmsRegNo: student.uucmsRegNo,
                 name: student.name,
                 phone: student.phone,
@@ -294,10 +298,10 @@ router.post('/upload-students/:subjectId', verifyFirebaseToken, upload.single('s
                 }
             }));
 
-            teacherSubject.studentCount = validatedStudents.length;
-            teacherSubject.updatedAt = new Date();
+            teacher.createdSubjects[subjectIndex].studentCount = validatedStudents.length;
+            teacher.createdSubjects[subjectIndex].updatedAt = new Date();
 
-            await teacherSubject.save();
+            await teacher.save();
 
             // Clean up uploaded file
             fs.unlinkSync(filePath);
@@ -307,7 +311,7 @@ router.post('/upload-students/:subjectId', verifyFirebaseToken, upload.single('s
                 message: `Successfully uploaded ${validatedStudents.length} students`,
                 data: {
                     studentCount: validatedStudents.length,
-                    students: teacherSubject.students
+                    students: teacher.createdSubjects[subjectIndex].students
                 }
             });
 
@@ -352,26 +356,30 @@ router.get('/subject/:subjectId/students', verifyFirebaseToken, async (req, res)
             });
         }
 
-        const teacherSubject = await TeacherSubject.findOne({
-            _id: subjectId,
-            teacherId: firebaseUid
-        });
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
 
-        if (!teacherSubject) {
+        const subject = teacher.createdSubjects.find(subject => subject._id.toString() === subjectId);
+        if (!subject) {
             return res.status(404).json({
                 success: false,
                 error: 'Subject not found or access denied'
             });
         }
 
-        console.log('✅ Found subject:', teacherSubject.subjectName, 'with', teacherSubject.students?.length || 0, 'students');
+        console.log('✅ Found subject:', subject.subjectName, 'with', subject.students?.length || 0, 'students');
 
         res.json({
             success: true,
             data: {
-                subjectName: teacherSubject.subjectName,
-                studentCount: teacherSubject.studentCount,
-                students: teacherSubject.students || []
+                subjectName: subject.subjectName,
+                studentCount: subject.studentCount,
+                students: subject.students || []
             }
         });
 
@@ -391,12 +399,16 @@ router.put('/subject/:subjectId/student/:studentIndex/marks', verifyFirebaseToke
         const { markType, value } = req.body; // markType: 'C1.test1', 'C1.activity', 'C2.test2', etc.
         const firebaseUid = req.firebaseUser.uid;
 
-        const teacherSubject = await TeacherSubject.findOne({
-            _id: subjectId,
-            teacherId: firebaseUid
-        });
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
 
-        if (!teacherSubject) {
+        const subjectIndex = teacher.createdSubjects.findIndex(subject => subject._id.toString() === subjectId);
+        if (subjectIndex === -1) {
             return res.status(404).json({
                 success: false,
                 error: 'Subject not found or access denied'
@@ -404,14 +416,14 @@ router.put('/subject/:subjectId/student/:studentIndex/marks', verifyFirebaseToke
         }
 
         const studentIdx = parseInt(studentIndex);
-        if (studentIdx < 0 || studentIdx >= teacherSubject.students.length) {
+        if (studentIdx < 0 || studentIdx >= teacher.createdSubjects[subjectIndex].students.length) {
             return res.status(400).json({
                 success: false,
                 error: 'Invalid student index'
             });
         }
 
-        const student = teacherSubject.students[studentIdx];
+        const student = teacher.createdSubjects[subjectIndex].students[studentIdx];
         const [component, field] = markType.split('.');
 
         // Update the specific mark
@@ -448,8 +460,8 @@ router.put('/subject/:subjectId/student/:studentIndex/marks', verifyFirebaseToke
             }
         }
 
-        teacherSubject.updatedAt = new Date();
-        await teacherSubject.save();
+        teacher.createdSubjects[subjectIndex].updatedAt = new Date();
+        await teacher.save();
 
         res.json({
             success: true,
@@ -546,13 +558,21 @@ router.post('/add-subject', verifyFirebaseToken, async (req, res) => {
         
         console.log('📝 Adding subject for teacher:', firebaseUid, 'Subject:', subjectName);
         
+        // Find the teacher
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
+        
         // Check if subject already exists for this teacher
-        const existingSubject = await TeacherSubject.findOne({
-            teacherId: firebaseUid,
-            streamId: streamId,
-            semesterNumber: semesterNumber,
-            subjectId: subjectId
-        });
+        const existingSubject = teacher.createdSubjects.find(subject => 
+            subject.streamId.toString() === streamId &&
+            subject.semesterNumber === semesterNumber &&
+            subject.subjectId.toString() === subjectId
+        );
         
         if (existingSubject) {
             return res.status(400).json({
@@ -561,9 +581,8 @@ router.post('/add-subject', verifyFirebaseToken, async (req, res) => {
             });
         }
         
-        // Create new TeacherSubject document
-        const teacherSubject = new TeacherSubject({
-            teacherId: firebaseUid,
+        // Add new subject to teacher's createdSubjects array
+        const newSubject = {
             streamId: streamId,
             streamName: streamName,
             semesterNumber: semesterNumber,
@@ -572,17 +591,24 @@ router.post('/add-subject', verifyFirebaseToken, async (req, res) => {
             subjectCode: subjectCode,
             status: 'active',
             studentCount: 0,
-            students: []
-        });
+            students: [],
+            iaTests: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
         
-        await teacherSubject.save();
+        teacher.createdSubjects.push(newSubject);
+        await teacher.save();
         
-        console.log('✅ Subject added successfully:', teacherSubject._id);
+        // Get the newly added subject (with generated _id)
+        const addedSubject = teacher.createdSubjects[teacher.createdSubjects.length - 1];
+        
+        console.log('✅ Subject added successfully:', addedSubject._id);
         
         res.json({
             success: true,
             message: 'Subject added successfully',
-            data: teacherSubject
+            data: addedSubject
         });
         
     } catch (error) {
@@ -594,22 +620,28 @@ router.post('/add-subject', verifyFirebaseToken, async (req, res) => {
     }
 });
 
-// Route to get teacher's subjects (TeacherSubject documents)
+// Route to get teacher's subjects
 router.get('/subjects', verifyFirebaseToken, async (req, res) => {
     try {
         const firebaseUid = req.firebaseUser.uid;
         
-        // Fetch TeacherSubject documents for this teacher
-        const teacherSubjects = await TeacherSubject.find({
-            teacherId: firebaseUid,
-            status: 'active'
-        });
+        // Find the teacher and get their subjects
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
 
-        console.log(`📚 Found ${teacherSubjects.length} subjects for teacher:`, firebaseUid);
+        // Filter active subjects
+        const activeSubjects = teacher.createdSubjects.filter(subject => subject.status === 'active');
+
+        console.log(`📚 Found ${activeSubjects.length} subjects for teacher:`, firebaseUid);
 
         res.json({
             success: true,
-            data: teacherSubjects
+            data: activeSubjects
         });
         
     } catch (error) {
@@ -629,22 +661,34 @@ router.delete('/remove-subject', verifyFirebaseToken, async (req, res) => {
         
         console.log('🗑️ Removing subject for teacher:', firebaseUid, 'Subject ID:', subjectId);
         
-        // Find and delete the TeacherSubject document
-        const result = await TeacherSubject.findOneAndDelete({
-            teacherId: firebaseUid,
-            subjectId: subjectId,
-            streamId: streamId,
-            semesterNumber: semester
-        });
+        // Find the teacher
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
         
-        if (!result) {
+        // Find and remove the subject from createdSubjects array
+        const subjectIndex = teacher.createdSubjects.findIndex(subject => 
+            subject.subjectId.toString() === subjectId &&
+            subject.streamId.toString() === streamId &&
+            subject.semesterNumber === semester
+        );
+        
+        if (subjectIndex === -1) {
             return res.status(404).json({
                 success: false,
                 error: 'Subject not found in your dashboard'
             });
         }
         
-        console.log('✅ Subject removed successfully:', result._id);
+        const removedSubject = teacher.createdSubjects[subjectIndex];
+        teacher.createdSubjects.splice(subjectIndex, 1);
+        await teacher.save();
+        
+        console.log('✅ Subject removed successfully:', removedSubject._id);
         
         res.json({
             success: true,
@@ -675,14 +719,20 @@ router.post('/import-marks/:subjectId', verifyFirebaseToken, marksUpload.single(
             });
         }
         
-        // Find the TeacherSubject document
-        const teacherSubject = await TeacherSubject.findOne({
-            _id: subjectId,
-            teacherId: firebaseUid,
-            status: 'active'
-        });
+        // Find the teacher and the specific subject
+        const teacher = await Teacher.findOne({ firebaseUid: firebaseUid });
+        if (!teacher) {
+            return res.status(404).json({
+                success: false,
+                error: 'Teacher not found'
+            });
+        }
+
+        const subjectIndex = teacher.createdSubjects.findIndex(subject => 
+            subject._id.toString() === subjectId && subject.status === 'active'
+        );
         
-        if (!teacherSubject) {
+        if (subjectIndex === -1) {
             return res.status(404).json({
                 success: false,
                 error: 'Subject not found or access denied'
@@ -735,7 +785,7 @@ router.post('/import-marks/:subjectId', verifyFirebaseToken, marksUpload.single(
         
         for (const markData of marksData) {
             // Find student in the subject's student list
-            const studentIndex = teacherSubject.students.findIndex(
+            const studentIndex = teacher.createdSubjects[subjectIndex].students.findIndex(
                 student => student.uucmsRegNo === markData.uucmsRegNo
             );
             
@@ -750,7 +800,7 @@ router.post('/import-marks/:subjectId', verifyFirebaseToken, marksUpload.single(
                 const grandTotal = c1Total + c2Total;
                 
                 // Update student marks
-                teacherSubject.students[studentIndex].marks = {
+                teacher.createdSubjects[subjectIndex].students[studentIndex].marks = {
                     C1: {
                         test1: markData.test1,
                         scaledDown: scaledDown1,
@@ -773,8 +823,9 @@ router.post('/import-marks/:subjectId', verifyFirebaseToken, marksUpload.single(
             }
         }
         
-        // Save the updated TeacherSubject document
-        await teacherSubject.save();
+        // Save the updated Teacher document
+        teacher.createdSubjects[subjectIndex].updatedAt = new Date();
+        await teacher.save();
         
         console.log(`✅ Marks imported: ${updatedCount} updated, ${notFoundCount} not found`);
         
@@ -805,16 +856,15 @@ router.post('/generate-report', verifyFirebaseToken, async (req, res) => {
         
         console.log('📊 Generating report for:', { streamId, semesterNumber, subjectId });
         
-        // Find all TeacherSubject documents for this stream/semester/subject combination
-        const teacherSubjects = await TeacherSubject.find({
-            streamId: streamId,
-            semesterNumber: semesterNumber,
-            subjectId: subjectId,
-            status: 'active'
-        }).populate('subjectId', 'name code')
-          .populate('streamId', 'name');
+        // Find all teachers who have this subject
+        const teachers = await Teacher.find({
+            'createdSubjects.streamId': streamId,
+            'createdSubjects.semesterNumber': semesterNumber,
+            'createdSubjects.subjectId': subjectId,
+            'createdSubjects.status': 'active'
+        });
         
-        if (teacherSubjects.length === 0) {
+        if (teachers.length === 0) {
             return res.status(404).json({
                 success: false,
                 error: 'No data found for the selected combination'
@@ -825,20 +875,29 @@ router.post('/generate-report', verifyFirebaseToken, async (req, res) => {
         let allStudents = [];
         let subjectInfo = null;
         
-        teacherSubjects.forEach(teacherSubject => {
-            if (!subjectInfo) {
-                subjectInfo = {
-                    subjectName: teacherSubject.subjectName,
-                    subjectCode: teacherSubject.subjectCode,
-                    streamName: teacherSubject.streamName,
-                    semesterNumber: teacherSubject.semesterNumber
-                };
-            }
+        teachers.forEach(teacher => {
+            const matchingSubjects = teacher.createdSubjects.filter(subject => 
+                subject.streamId.toString() === streamId &&
+                subject.semesterNumber === semesterNumber &&
+                subject.subjectId.toString() === subjectId &&
+                subject.status === 'active'
+            );
             
-            // Add students from this teacher
-            if (teacherSubject.students && teacherSubject.students.length > 0) {
-                allStudents = allStudents.concat(teacherSubject.students);
-            }
+            matchingSubjects.forEach(subject => {
+                if (!subjectInfo) {
+                    subjectInfo = {
+                        subjectName: subject.subjectName,
+                        subjectCode: subject.subjectCode,
+                        streamName: subject.streamName,
+                        semesterNumber: subject.semesterNumber
+                    };
+                }
+                
+                // Add students from this subject
+                if (subject.students && subject.students.length > 0) {
+                    allStudents = allStudents.concat(subject.students);
+                }
+            });
         });
         
         // Remove duplicates based on UUCMS Reg No
