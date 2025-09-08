@@ -77,12 +77,12 @@ async function loadTeacherProfile(user) {
                 console.log('✅ Teacher profile loaded:', teacherData);
                 
                 // Update subject count
-                const subjectsCount = teacherData.createdSubjects?.length || 0;
+                const subjectsCount = teacherData.subjects?.length || 0;
                 document.getElementById('subjectCount').textContent = subjectsCount;
                 
                 // Show appropriate section based on subjects
                 if (subjectsCount > 0) {
-                    showSubjectsList(teacherData.createdSubjects);
+                    showSubjectsList(teacherData.subjects);
                 } else {
                     showEmptyState();
                 }
@@ -159,7 +159,7 @@ function createSubjectCard(subject, index) {
                     <button onclick="editSubject(${index})" class="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50">
                         <i class="fas fa-edit mr-2"></i>Edit
                     </button>
-                    <button onclick="removeSubject('${subject.subjectId}', '${subject.streamId}', ${subject.semester})" class="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
+                    <button onclick="removeSubject('${subject._id}')" class="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
                         <i class="fas fa-trash mr-2"></i>Remove
                     </button>
                 </div>
@@ -176,7 +176,7 @@ function createSubjectCard(subject, index) {
         
         <div class="flex items-center justify-between pt-4 border-t border-gray-100">
             <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Active</span>
-            <button onclick="openSubjectDashboard('${subject.subjectId}')" class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
+            <button onclick="openSubjectDashboard('${subject._id}')" class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
                 Open Dashboard →
             </button>
         </div>
@@ -262,7 +262,7 @@ function editSubject(index) {
     showAlert('info', 'Edit functionality coming soon!');
 }
 
-function removeSubject(subjectId, streamId, semester) {
+function removeSubject(subjectId) {
     // Show confirmation modal
     showConfirmation(
         'Remove Subject',
@@ -278,9 +278,7 @@ function removeSubject(subjectId, streamId, semester) {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        subjectId,
-                        streamId,
-                        semester
+                        subjectId
                     })
                 });
                 
