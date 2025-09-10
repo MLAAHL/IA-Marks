@@ -41,6 +41,20 @@ mongoose.connection.on('reconnected', () => {
     console.log('✅ MongoDB reconnected');
 });
 
+// Environment variables endpoint for frontend
+app.get('/api/env', (req, res) => {
+    res.json({
+        NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+        NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+        NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+        NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL
+    });
+});
+
 // API Routes
 app.use('/api/academic', require('./routes/academic'));
 app.use('/api/teachers', require('./routes/teacher')); // Fixed: Changed from /api/teacher to /api/teachers
@@ -69,6 +83,11 @@ app.get('/subject-selection', (req, res) => {
 // Serve report-generator page
 app.get('/report-generator', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'report-generator.html'));
+});
+
+// Serve whatsapp-marks page
+app.get('/whatsapp-marks', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'whatsapp-marks.html'));
 });
 
 app.get('/dashboard', (req, res) => {
@@ -124,10 +143,9 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
     console.log('⚠️ SIGINT received, shutting down gracefully');
-    mongoose.connection.close(() => {
-        console.log('✅ MongoDB connection closed');
-        process.exit(0);
-    });
+    mongoose.connection.close();
+    console.log('✅ MongoDB connection closed');
+    process.exit(0);
 });
 
 // Start server

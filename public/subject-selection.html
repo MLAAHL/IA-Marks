@@ -27,9 +27,10 @@
             measurementId: "G-19HPME0K12"
         };
 
-        // Initialize Firebase
+        // Initialize Firebase immediately
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
+        console.log('✅ Firebase initialized');
         
         let currentUser = null;
         let streams = [];
@@ -58,7 +59,16 @@
         
         function displayUserInfo(user) {
             const email = user.email;
+            const displayName = user.displayName || email.split('@')[0];
+            
+            // Update email displays
             document.getElementById('userEmail').textContent = email;
+            
+            // Update profile icon with user initials
+            const profileIcon = document.getElementById('profileIcon');
+            const initials = displayName.substring(0, 2).toUpperCase();
+            profileIcon.textContent = initials;
+            profileIcon.setAttribute('title', `${displayName} (${email})`);
         }
         
         async function loadStreamsAndSubjects() {
@@ -166,9 +176,6 @@
             document.getElementById('backToDashboard').addEventListener('click', () => {
                 window.location.href = '/dashboard';
             });
-            
-            // Logout
-            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
         }
         
         async function handleSubjectSelection(e) {
@@ -317,10 +324,11 @@
                     <div class="text-right">
                         <p id="userEmail" class="text-sm font-medium text-gray-900">Loading...</p>
                     </div>
-                    <button id="logoutBtn" class="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                        <i class="fas fa-sign-out-alt mr-1"></i>
-                        Logout
-                    </button>
+                    
+                    <!-- Profile Icon (Square with initials) -->
+                    <div id="profileIcon" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                        --
+                    </div>
                 </div>
             </div>
         </div>

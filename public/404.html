@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Not Found - IA-MARKS MANAGEMENT</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#6366f1',
+                        'primary-dark': '#4f46e5',
+                        'accent': '#8b5cf6',
+                        'light-gray': '#f8fafc',
+                        'text-gray': '#64748b'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="min-h-screen bg-light-gray flex items-center justify-center p-4">
+    <!-- Background Pattern -->
+    <div class="fixed inset-0 bg-gradient-to-br from-blue-50 to-purple-50 opacity-50"></div>
+    
+    <!-- Main Container -->
+    <div class="relative w-full max-w-md text-center">
+        <!-- 404 Card -->
+        <div class="bg-white rounded-2xl shadow-xl p-8 relative z-10">
+            <!-- Error Icon -->
+            <div class="w-20 h-20 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <i class="fas fa-exclamation-triangle text-red-500 text-3xl"></i>
+            </div>
+            
+            <!-- Error Message -->
+            <h1 class="text-6xl font-bold text-gray-800 mb-4">404</h1>
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">Page Not Found</h2>
+            <p class="text-text-gray mb-8">
+                The page you're looking for doesn't exist or has been moved.
+            </p>
+            
+            <!-- Action Buttons -->
+            <div class="space-y-4">
+                <button 
+                    onclick="window.history.back()" 
+                    class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2"
+                >
+                    <i class="fas fa-arrow-left"></i>
+                    <span>Go Back</span>
+                </button>
+                
+                <button 
+                    onclick="window.location.href='/'" 
+                    class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2"
+                >
+                    <i class="fas fa-home"></i>
+                    <span>Go to Login</span>
+                </button>
+            </div>
+            
+            <!-- Footer -->
+            <div class="mt-8 text-center text-xs text-text-gray">
+                <div>© 2025 IA-MARKS MANAGEMENT</div>
+                <div>Smart Assessment System</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

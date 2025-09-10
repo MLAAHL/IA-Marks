@@ -38,29 +38,39 @@
         let isEditMode = false; // Track if we're in edit mode
         
         document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Subject Dashboard loading...');
+            console.log('📍 Current URL:', window.location.href);
+            
             // Get subject ID from URL parameters
             const urlParams = new URLSearchParams(window.location.search);
             currentSubjectId = urlParams.get('subjectId');
             
             console.log('🔍 Subject ID from URL:', currentSubjectId);
+            console.log('🔍 All URL params:', Object.fromEntries(urlParams));
             
-            if (!currentSubjectId || currentSubjectId === 'undefined') {
-                showAlert('error', 'No subject ID provided');
+            // Show loading state immediately
+            document.getElementById('subjectName').textContent = 'Loading subject...';
+            
+            if (!currentSubjectId || currentSubjectId === 'undefined' || currentSubjectId === 'null') {
+                console.error('❌ No valid subject ID provided');
+                showAlert('error', 'No subject ID provided. Redirecting to dashboard...');
                 setTimeout(() => {
                     window.location.href = '/dashboard';
-                }, 2000);
+                }, 3000);
                 return;
             }
             
             // Validate ObjectId format
             if (!currentSubjectId.match(/^[0-9a-fA-F]{24}$/)) {
-                showAlert('error', 'Invalid subject ID format');
+                console.error('❌ Invalid subject ID format:', currentSubjectId);
+                showAlert('error', 'Invalid subject ID format. Redirecting to dashboard...');
                 setTimeout(() => {
                     window.location.href = '/dashboard';
-                }, 2000);
+                }, 3000);
                 return;
             }
             
+            console.log('✅ Valid subject ID, initializing dashboard...');
             initializeSubjectDashboard();
         });
         
@@ -105,12 +115,17 @@
         
         async function loadSubjectData() {
             try {
+                console.log('📡 Starting to load subject data...');
                 showAlert('info', 'Loading subject data...');
                 
                 const idToken = await currentUser.getIdToken();
+                console.log('🔑 Got Firebase ID token');
+                
+                const apiUrl = `/api/teachers/subject/${currentSubjectId}/students`;
+                console.log('📡 Making API call to:', apiUrl);
                 
                 // Fetch students for this subject
-                const response = await fetch(`/api/teachers/subject/${currentSubjectId}/students`, {
+                const response = await fetch(apiUrl, {
                     method: 'GET',
                     headers: {
                         'Authorization': `Bearer ${idToken}`,
@@ -118,36 +133,60 @@
                     }
                 });
                 
+                console.log('📡 API Response status:', response.status);
+                console.log('📡 API Response headers:', Object.fromEntries(response.headers));
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error('❌ API Error Response:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
                 }
                 
                 const data = await response.json();
+                console.log('📊 API Response data:', data);
                 
                 if (data.success) {
+                    console.log('✅ Subject data loaded successfully:', data.data);
+                    
                     // Update page title and subject info
-                    document.getElementById('subjectName').textContent = data.data.subjectName;
-                    document.getElementById('studentCount').textContent = data.data.studentCount;
-                    document.title = `${data.data.subjectName} - Subject Dashboard`;
+                    document.getElementById('subjectName').textContent = data.data.subjectName || 'Unknown Subject';
+                    document.getElementById('studentCount').textContent = data.data.studentCount || 0;
+                    document.title = `${data.data.subjectName || 'Subject'} - Subject Dashboard`;
                     
                     students = data.data.students || [];
                     allStudents = [...students]; // Store all students for search
                     
+                    console.log('👥 Found', students.length, 'students');
+                    
                     if (students.length > 0) {
+                        console.log('📋 Showing students table');
                         showStudentsTable();
                         renderStudentsTable(students);
                     } else {
+                        console.log('📤 Showing upload section (no students)');
                         showUploadSection();
                     }
                     
                     hideAlert();
                 } else {
+                    console.error('❌ API returned success=false:', data);
                     throw new Error(data.error || 'Failed to load subject data');
                 }
                 
             } catch (error) {
                 console.error('❌ Error loading subject data:', error);
-                showAlert('error', `Failed to load subject data: ${error.message}`);
+                console.error('❌ Error stack:', error.stack);
+                
+                // Show detailed error message
+                const errorMsg = error.message.includes('Failed to fetch') 
+                    ? 'Network error - please check your connection and try again'
+                    : `Failed to load subject data: ${error.message}`;
+                    
+                showAlert('error', errorMsg);
+                
+                // Show error state in UI
+                document.getElementById('subjectName').textContent = 'Error loading subject';
+                document.getElementById('studentCount').textContent = '0';
             }
         }
         
@@ -306,8 +345,6 @@
                 window.location.href = '/dashboard';
             });
             
-            // Logout functionality
-            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
             
             // Edit/Save button functionality
             document.getElementById('editSaveBtn').addEventListener('click', toggleEditMode);
@@ -647,10 +684,6 @@
                     <div class="flex items-center space-x-2">
                         <button id="profileBtn" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-xl flex items-center justify-center text-white font-medium hover:shadow-lg transition-all duration-200">
                             <i class="fas fa-user"></i>
-                        </button>
-                        <button id="logoutBtn" class="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                            <i class="fas fa-sign-out-alt mr-1"></i>
-                            Logout
                         </button>
                     </div>
                 </div>

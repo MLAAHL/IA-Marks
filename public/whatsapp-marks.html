@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Send Marks via WhatsApp - IA-MARKS MANAGEMENT</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK v9 -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+        import { getAuth, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+        
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDmvzNuE-szbAkFjeEjCNFJK-65sC0_IfE",
+            authDomain: "smart-attendance-a9ab4.firebaseapp.com",
+            projectId: "smart-attendance-a9ab4",
+            storageBucket: "smart-attendance-a9ab4.firebasestorage.app",
+            messagingSenderId: "447867381654",
+            appId: "1:447867381654:web:e27e6cceb8c63c0c799fb7",
+            measurementId: "G-19HPME0K12"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        
+        let currentUser = null;
+        let streams = [];
+        let subjects = [];
+        let selectedStudents = [];
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeWhatsAppMarks();
+        });
+        
+        function initializeWhatsAppMarks() {
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    currentUser = user;
+                    console.log('✅ User authenticated:', user.email);
+                    
+                    displayUserInfo(user);
+                    await loadStreamsAndSubjects();
+                    initializeUIHandlers();
+                    
+                } else {
+                    console.log('❌ No user authenticated, redirecting to login');
+                    window.location.href = '/';
+                }
+            });
+        }
+        
+        function displayUserInfo(user) {
+            const email = user.email;
+            const displayName = user.displayName || email.split('@')[0];
+            
+            document.getElementById('userEmail').textContent = email;
+            
+            const profileIcon = document.getElementById('profileIcon');
+            const initials = displayName.substring(0, 2).toUpperCase();
+            profileIcon.textContent = initials;
+            profileIcon.setAttribute('title', `${displayName} (${email})`);
+        }
+        
+        async function loadStreamsAndSubjects() {
+            try {
+                showAlert('info', 'Loading available subjects...');
+                
+                // Load streams
+                const streamsResponse = await fetch('/api/academic/streams');
+                if (streamsResponse.ok) {
+                    const streamsData = await streamsResponse.json();
+                    streams = streamsData.streams || streamsData;
+                    populateStreamSelect();
+                }
+                
+                hideAlert();
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showAlert('error', 'Failed to load subject data');
+            }
+        }
+        
+        function populateStreamSelect() {
+            const streamSelect = document.getElementById('streamSelect');
+            streamSelect.innerHTML = '<option value="">Select Stream</option>';
+            
+            streams.forEach(stream => {
+                const option = document.createElement('option');
+                option.value = stream._id;
+                option.textContent = stream.name;
+                streamSelect.appendChild(option);
+            });
+        }
+        
+        async function handleStreamChange() {
+            const streamId = document.getElementById('streamSelect').value;
+            const semesterSelect = document.getElementById('semesterSelect');
+            const subjectSelect = document.getElementById('subjectSelect');
+            
+            // Reset dependent dropdowns
+            semesterSelect.innerHTML = '<option value="">Select Semester</option>';
+            subjectSelect.innerHTML = '<option value="">Select Subject</option>';
+            hideStudentsList();
+            
+            if (!streamId) return;
+            
+            try {
+                // Load semesters for selected stream
+                const response = await fetch(`/api/academic/streams/${streamId}/semesters`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const semesters = data || [];
+                    
+                    semesters.forEach(semester => {
+                        const option = document.createElement('option');
+                        option.value = semester.number;
+                        option.textContent = `Semester ${semester.number}`;
+                        semesterSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading semesters:', error);
+                showAlert('error', 'Failed to load semesters');
+            }
+        }
+        
+        async function handleSemesterChange() {
+            const streamId = document.getElementById('streamSelect').value;
+            const semester = document.getElementById('semesterSelect').value;
+            const subjectSelect = document.getElementById('subjectSelect');
+            
+            subjectSelect.innerHTML = '<option value="">Select Subject</option>';
+            hideStudentsList();
+            
+            if (!streamId || !semester) return;
+            
+            try {
+                const response = await fetch(`/api/academic/streams/${streamId}/semester/${semester}/subjects`);
+                if (response.ok) {
+                    const data = await response.json();
+                    subjects = data || [];
+                    
+                    subjects.forEach(subject => {
+                        const option = document.createElement('option');
+                        option.value = subject._id;
+                        option.textContent = `${subject.name} (${subject.code})`;
+                        subjectSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading subjects:', error);
+                showAlert('error', 'Failed to load subjects');
+            }
+        }
+        
+        async function handleSubjectChange() {
+            const streamId = document.getElementById('streamSelect').value;
+            const semester = document.getElementById('semesterSelect').value;
+            const subjectId = document.getElementById('subjectSelect').value;
+            
+            if (!streamId || !semester || !subjectId) {
+                hideStudentsList();
+                return;
+            }
+            
+            try {
+                showAlert('info', 'Loading student marks...');
+                
+                const idToken = await currentUser.getIdToken();
+                const response = await fetch('/api/teachers/generate-report', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        streamId: streamId,
+                        semesterNumber: parseInt(semester),
+                        subjectId: subjectId
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success && data.data.students.length > 0) {
+                        selectedStudents = data.data.students;
+                        displayStudentsList(data.data);
+                        hideAlert();
+                    } else {
+                        hideStudentsList();
+                        showAlert('error', 'No student data found for this subject');
+                    }
+                } else {
+                    throw new Error('Failed to load student data');
+                }
+                
+            } catch (error) {
+                console.error('Error loading student data:', error);
+                showAlert('error', 'Failed to load student marks');
+                hideStudentsList();
+            }
+        }
+        
+        function displayStudentsList(data) {
+            const studentsSection = document.getElementById('studentsSection');
+            const subjectInfo = document.getElementById('subjectInfo');
+            const studentsGrid = document.getElementById('studentsGrid');
+            
+            // Update subject info
+            subjectInfo.innerHTML = `
+                <h3 class="text-xl font-semibold text-gray-900 mb-2">${data.subjectName}</h3>
+                <p class="text-gray-600">${data.streamName} - Semester ${data.semesterNumber}</p>
+                <p class="text-sm text-gray-500 mt-1">${data.students.length} students found</p>
+            `;
+            
+            // Clear and populate students grid
+            studentsGrid.innerHTML = '';
+            
+            data.students.forEach((student, index) => {
+                const studentCard = createStudentCard(student, index);
+                studentsGrid.appendChild(studentCard);
+            });
+            
+            studentsSection.classList.remove('hidden');
+            
+            // Update send button
+            updateSendButton();
+        }
+        
+        function createStudentCard(student, index) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-all duration-200';
+            
+            const marks = student.marks || {};
+            const c1Total = marks.C1?.total || 0;
+            const c2Total = marks.C2?.total || 0;
+            const grandTotal = marks.grandTotal || (c1Total + c2Total);
+            
+            // Determine grade and color
+            let grade = 'F';
+            let gradeColor = 'text-red-600 bg-red-100';
+            
+            if (grandTotal >= 35) {
+                grade = 'A+';
+                gradeColor = 'text-green-600 bg-green-100';
+            } else if (grandTotal >= 30) {
+                grade = 'A';
+                gradeColor = 'text-green-600 bg-green-100';
+            } else if (grandTotal >= 25) {
+                grade = 'B+';
+                gradeColor = 'text-blue-600 bg-blue-100';
+            } else if (grandTotal >= 20) {
+                grade = 'B';
+                gradeColor = 'text-blue-600 bg-blue-100';
+            } else if (grandTotal >= 15) {
+                grade = 'C';
+                gradeColor = 'text-yellow-600 bg-yellow-100';
+            }
+            
+            card.innerHTML = `
+                <div class="flex items-start justify-between mb-3">
+                    <div class="flex items-center space-x-3">
+                        <input type="checkbox" 
+                               id="student_${index}" 
+                               class="student-checkbox w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                               onchange="updateSendButton()">
+                        <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                            <span class="text-white font-semibold text-sm">${student.name.substring(0, 2).toUpperCase()}</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${gradeColor}">
+                            ${grade}
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <h4 class="font-medium text-gray-900">${student.name}</h4>
+                    <p class="text-sm text-gray-500">UUCMS: ${student.uucmsRegNo}</p>
+                    ${student.phone ? `<p class="text-sm text-gray-500">📱 ${student.phone}</p>` : ''}
+                </div>
+                
+                <div class="grid grid-cols-3 gap-2 text-center text-sm">
+                    <div class="bg-blue-50 rounded p-2">
+                        <div class="font-semibold text-blue-800">${c1Total}</div>
+                        <div class="text-xs text-blue-600">C1 Total</div>
+                    </div>
+                    <div class="bg-purple-50 rounded p-2">
+                        <div class="font-semibold text-purple-800">${c2Total}</div>
+                        <div class="text-xs text-purple-600">C2 Total</div>
+                    </div>
+                    <div class="bg-green-50 rounded p-2">
+                        <div class="font-bold text-green-800">${grandTotal}</div>
+                        <div class="text-xs text-green-600">Grand Total</div>
+                    </div>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function hideStudentsList() {
+            document.getElementById('studentsSection').classList.add('hidden');
+        }
+        
+        function updateSendButton() {
+            const checkboxes = document.querySelectorAll('.student-checkbox:checked');
+            const sendButton = document.getElementById('sendMarksBtn');
+            const selectAllBtn = document.getElementById('selectAllBtn');
+            const deselectAllBtn = document.getElementById('deselectAllBtn');
+            
+            if (checkboxes.length > 0) {
+                sendButton.disabled = false;
+                sendButton.className = 'px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors flex items-center space-x-2';
+                sendButton.innerHTML = `
+                    <i class="fab fa-whatsapp"></i>
+                    <span>Send Marks to ${checkboxes.length} Parent${checkboxes.length > 1 ? 's' : ''}</span>
+                `;
+            } else {
+                sendButton.disabled = true;
+                sendButton.className = 'px-6 py-3 bg-gray-400 text-white font-medium rounded-lg cursor-not-allowed flex items-center space-x-2';
+                sendButton.innerHTML = `
+                    <i class="fab fa-whatsapp"></i>
+                    <span>Select Students to Send Marks</span>
+                `;
+            }
+            
+            // Update select/deselect buttons
+            const totalCheckboxes = document.querySelectorAll('.student-checkbox').length;
+            if (checkboxes.length === totalCheckboxes && totalCheckboxes > 0) {
+                selectAllBtn.style.display = 'none';
+                deselectAllBtn.style.display = 'inline-flex';
+            } else {
+                selectAllBtn.style.display = 'inline-flex';
+                deselectAllBtn.style.display = 'none';
+            }
+        }
+        
+        function selectAllStudents() {
+            const checkboxes = document.querySelectorAll('.student-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+            });
+            updateSendButton();
+        }
+        
+        function deselectAllStudents() {
+            const checkboxes = document.querySelectorAll('.student-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            updateSendButton();
+        }
+        
+        function sendMarksViaWhatsApp() {
+            const selectedCheckboxes = document.querySelectorAll('.student-checkbox:checked');
+            
+            if (selectedCheckboxes.length === 0) {
+                showAlert('error', 'Please select at least one student');
+                return;
+            }
+            
+            // For now, just show a placeholder message
+            showAlert('info', `WhatsApp integration coming soon! Selected ${selectedCheckboxes.length} students for sending marks.`);
+            
+            // TODO: Implement actual WhatsApp API integration
+            console.log('Selected students for WhatsApp:', selectedCheckboxes.length);
+        }
+        
+        function initializeUIHandlers() {
+            // Back to dashboard
+            document.getElementById('backToDashboard').addEventListener('click', () => {
+                window.location.href = '/dashboard';
+            });
+            
+            
+            // Dropdown changes
+            document.getElementById('streamSelect').addEventListener('change', handleStreamChange);
+            document.getElementById('semesterSelect').addEventListener('change', handleSemesterChange);
+            document.getElementById('subjectSelect').addEventListener('change', handleSubjectChange);
+            
+            // Selection buttons
+            document.getElementById('selectAllBtn').addEventListener('click', selectAllStudents);
+            document.getElementById('deselectAllBtn').addEventListener('click', deselectAllStudents);
+            
+            // Send button
+            document.getElementById('sendMarksBtn').addEventListener('click', sendMarksViaWhatsApp);
+        }
+        
+        // Make functions global for onclick handlers
+        window.updateSendButton = updateSendButton;
+        window.selectAllStudents = selectAllStudents;
+        window.deselectAllStudents = deselectAllStudents;
+        
+        // Utility functions
+        function showAlert(type, message) {
+            const alertDiv = document.getElementById('alertMessage');
+            const alertText = document.getElementById('alertText');
+            
+            let bgColor, textColor, icon;
+            switch (type) {
+                case 'success':
+                    bgColor = 'bg-green-100 border-green-400';
+                    textColor = 'text-green-700';
+                    icon = 'fas fa-check-circle';
+                    break;
+                case 'error':
+                    bgColor = 'bg-red-100 border-red-400';
+                    textColor = 'text-red-700';
+                    icon = 'fas fa-exclamation-circle';
+                    break;
+                case 'info':
+                default:
+                    bgColor = 'bg-blue-100 border-blue-400';
+                    textColor = 'text-blue-700';
+                    icon = 'fas fa-info-circle';
+            }
+            
+            alertDiv.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm border ${bgColor} ${textColor}`;
+            alertText.innerHTML = `<i class="${icon} mr-2"></i>${message}`;
+            
+            alertDiv.classList.remove('hidden');
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    hideAlert();
+                }, 5000);
+            }
+        }
+        
+        function hideAlert() {
+            document.getElementById('alertMessage').classList.add('hidden');
+        }
+    </script>
+    
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#6366f1',
+                        'primary-dark': '#4f46e5',
+                        'accent': '#8b5cf6',
+                        'light-gray': '#f8fafc',
+                        'text-gray': '#64748b'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="min-h-screen bg-light-gray">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-100 fixed top-0 left-0 right-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Left side - Back button and Title -->
+                <div class="flex items-center space-x-4">
+                    <button id="backToDashboard" class="flex items-center text-gray-600 hover:text-gray-900 transition-colors">
+                        <i class="fas fa-arrow-left mr-2"></i>
+                        Back to Dashboard
+                    </button>
+                    <div class="h-6 border-l border-gray-300"></div>
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-green-600 rounded-xl flex items-center justify-center">
+                            <i class="fab fa-whatsapp text-white text-lg"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-lg font-semibold text-gray-900">Send Marks via WhatsApp</h1>
+                            <p class="text-sm text-text-gray">Share IA marks with parents</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right side - User Info -->
+                <div class="flex items-center space-x-4">
+                    <div class="text-right">
+                        <p id="userEmail" class="text-sm font-medium text-gray-900">Loading...</p>
+                    </div>
+                    
+                    <div class="flex items-center space-x-2">
+                        <div id="profileIcon" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-xl flex items-center justify-center text-white font-medium">
+                            --
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
+        <!-- Selection Form -->
+        <div class="bg-white rounded-2xl shadow-sm p-8 mb-8">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fab fa-whatsapp text-green-600 text-2xl"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-900 mb-2">Send IA Marks to Parents</h2>
+                <p class="text-gray-600">Select stream, semester, and subject to view student marks</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Stream Selection -->
+                <div>
+                    <label for="streamSelect" class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-graduation-cap mr-2 text-primary"></i>
+                        Stream
+                    </label>
+                    <select id="streamSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <option value="">Select Stream</option>
+                    </select>
+                </div>
+                
+                <!-- Semester Selection -->
+                <div>
+                    <label for="semesterSelect" class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-calendar-alt mr-2 text-primary"></i>
+                        Semester
+                    </label>
+                    <select id="semesterSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <option value="">Select Semester</option>
+                    </select>
+                </div>
+                
+                <!-- Subject Selection -->
+                <div>
+                    <label for="subjectSelect" class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-book mr-2 text-primary"></i>
+                        Subject
+                    </label>
+                    <select id="subjectSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <option value="">Select Subject</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Students List Section -->
+        <div id="studentsSection" class="hidden">
+            <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div id="subjectInfo">
+                        <!-- Subject info will be populated here -->
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <button id="selectAllBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                            <i class="fas fa-check-double mr-2"></i>
+                            Select All
+                        </button>
+                        <button id="deselectAllBtn" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg transition-colors" style="display: none;">
+                            <i class="fas fa-times mr-2"></i>
+                            Deselect All
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Students Grid -->
+                <div id="studentsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                    <!-- Student cards will be populated here -->
+                </div>
+                
+                <!-- Send Button -->
+                <div class="text-center pt-6 border-t border-gray-200">
+                    <button id="sendMarksBtn" disabled class="px-6 py-3 bg-gray-400 text-white font-medium rounded-lg cursor-not-allowed flex items-center space-x-2 mx-auto">
+                        <i class="fab fa-whatsapp"></i>
+                        <span>Select Students to Send Marks</span>
+                    </button>
+                    
+                    <div class="mt-4 text-sm text-gray-500">
+                        <p><i class="fas fa-info-circle mr-1"></i> Marks will be sent to parents' WhatsApp numbers</p>
+                        <p class="mt-1">Make sure student phone numbers are correctly entered in the system</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Alert Message -->
+    <div id="alertMessage" class="hidden fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm">
+        <p id="alertText" class="text-sm font-medium"></p>
+    </div>
+</body>
+</html>

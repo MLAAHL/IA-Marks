@@ -10,11 +10,17 @@ const Teacher = require('../models/Teacher');
 // const TeacherSubject = require('../models/TeacherSubject'); // Removed - using Teacher model directly
 const admin = require('firebase-admin');
 
-// Initialize Firebase Admin SDK (add this to your main server file)
-const serviceAccount = require('../config/firebase-service-account.json');
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-});
+// Initialize Firebase Admin SDK using environment variables
+const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || './config/firebase-service-account.json';
+const fullPath = path.resolve(__dirname, '..', serviceAccountPath);
+const serviceAccount = require(fullPath);
+
+// Only initialize if not already initialized
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+}
 
 // Middleware to verify Firebase token
 async function verifyFirebaseToken(req, res, next) {

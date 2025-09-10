@@ -27,15 +27,25 @@
             measurementId: "G-19HPME0K12"
         };
 
-        // Initialize Firebase
+        // Initialize Firebase immediately
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
+        console.log('✅ Firebase initialized');
         
         let currentUser = null;
         
         // Initialize dashboard when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
             initializeDashboard();
+            
+            // Close subject menus when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('[id^="subjectMenu"]') && !e.target.closest('button[onclick^="toggleSubjectMenu"]')) {
+                    document.querySelectorAll('[id^="subjectMenu"]').forEach(menu => {
+                        menu.classList.add('hidden');
+                    });
+                }
+            });
         });
         
         function initializeDashboard() {
@@ -61,18 +71,12 @@
             
             // Update email displays
             document.getElementById('userEmail').textContent = email;
-            document.getElementById('dropdownUserEmail').textContent = email;
             
-            // Update profile button with user initials or photo
-            const profileBtn = document.getElementById('profileBtn');
-            if (user.photoURL) {
-                profileBtn.innerHTML = `<img src="${user.photoURL}" alt="Profile" class="w-8 h-8 rounded-lg object-cover">`;
-            } else {
-                const initials = displayName.substring(0, 2).toUpperCase();
-                profileBtn.innerHTML = `<span class="text-sm font-bold">${initials}</span>`;
-            }
-            
-            profileBtn.setAttribute('title', `${displayName} (${email})`);
+            // Update profile icon with user initials
+            const profileIcon = document.getElementById('profileIcon');
+            const initials = displayName.substring(0, 2).toUpperCase();
+            profileIcon.textContent = initials;
+            profileIcon.setAttribute('title', `${displayName} (${email})`);
         }
         
         async function loadTeacherProfile(user) {
@@ -181,14 +185,26 @@
         
         function createSubjectCard(subject, index) {
             const card = document.createElement('div');
-            card.className = 'bg-white rounded-xl p-6 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/50 transition-all duration-200 transform hover:scale-105 border border-primary/50';
+            card.className = 'bg-white rounded-xl p-6 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/50 transition-all duration-200 transform hover:scale-105 border border-primary/50 relative';
+            card.setAttribute('data-subject-id', subject.subjectId);
+            card.setAttribute('data-stream-id', subject.streamId);
+            card.setAttribute('data-semester', subject.semesterNumber);
             
             // Create semester name from semesterNumber
             const semesterName = `Semester ${subject.semesterNumber}`;
             
             card.innerHTML = `
+                <!-- Selection Checkbox -->
+                <div class="absolute top-3 left-3 z-10">
+                    <input type="checkbox" class="subject-checkbox w-4 h-4 text-primary bg-gray-100 border-gray-300 rounded focus:ring-primary focus:ring-2" 
+                           data-subject-id="${subject.subjectId}" 
+                           data-stream-id="${subject.streamId}" 
+                           data-semester="${subject.semesterNumber}" 
+                           onchange="updateSelectionControls()">
+                </div>
+                
                 <div class="flex items-center justify-between mb-4">
-                    <div class="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center">
+                    <div class="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center ml-6">
                         <i class="fas fa-book text-white text-lg"></i>
                     </div>
                     <div class="relative">
@@ -224,24 +240,37 @@
         }
         
         function initializeUIHandlers() {
-            // Profile dropdown toggle
-            const profileBtn = document.getElementById('profileBtn');
-            const profileDropdown = document.getElementById('profileDropdown');
+            // Hamburger menu toggle
+            const hamburgerBtn = document.getElementById('hamburgerBtn');
+            const hamburgerMenu = document.getElementById('hamburgerMenu');
+            const menuOverlay = document.getElementById('menuOverlay');
+            const closeMenuBtn = document.getElementById('closeMenuBtn');
             
-            profileBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                profileDropdown.classList.toggle('hidden');
+            // Open hamburger menu
+            hamburgerBtn.addEventListener('click', () => {
+                hamburgerMenu.classList.remove('-translate-x-full');
+                menuOverlay.classList.remove('hidden');
             });
             
-            // Close dropdown when clicking outside
-            document.addEventListener('click', (e) => {
-                if (!profileDropdown.contains(e.target) && !profileBtn.contains(e.target)) {
-                    profileDropdown.classList.add('hidden');
-                }
+            // Close hamburger menu
+            const closeMenu = () => {
+                hamburgerMenu.classList.add('-translate-x-full');
+                menuOverlay.classList.add('hidden');
+            };
+            
+            closeMenuBtn.addEventListener('click', closeMenu);
+            menuOverlay.addEventListener('click', closeMenu);
+            
+            // Menu items
+            document.getElementById('menuGenerateReportBtn').addEventListener('click', () => {
+                window.location.href = '/report-generator';
             });
             
-            // Logout functionality
-            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+            document.getElementById('menuWhatsAppBtn').addEventListener('click', () => {
+                window.location.href = '/whatsapp-marks';
+            });
+            
+            document.getElementById('menuLogoutBtn').addEventListener('click', handleLogout);
             
             // Add subject buttons
             document.getElementById('addFirstSubjectBtn').addEventListener('click', () => {
@@ -254,11 +283,15 @@
                 });
             }
             
-            // Generate Report button
-            if (document.getElementById('generateReportBtn')) {
-                document.getElementById('generateReportBtn').addEventListener('click', () => {
-                    window.location.href = '/report-generator';
-                });
+            // Selection controls
+            if (document.getElementById('selectAllBtn')) {
+                document.getElementById('selectAllBtn').addEventListener('click', selectAllSubjects);
+            }
+            if (document.getElementById('deselectAllBtn')) {
+                document.getElementById('deselectAllBtn').addEventListener('click', deselectAllSubjects);
+            }
+            if (document.getElementById('deleteSelectedBtn')) {
+                document.getElementById('deleteSelectedBtn').addEventListener('click', deleteSelectedSubjects);
             }
         }
         
@@ -336,6 +369,112 @@
             window.location.href = `/subject-dashboard?subjectId=${subjectId}`;
         }
         
+        // Selection functions
+        function selectAllSubjects() {
+            const checkboxes = document.querySelectorAll('.subject-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+            });
+            updateSelectionControls();
+        }
+        
+        function deselectAllSubjects() {
+            const checkboxes = document.querySelectorAll('.subject-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            updateSelectionControls();
+        }
+        
+        window.updateSelectionControls = function() {
+            const checkboxes = document.querySelectorAll('.subject-checkbox');
+            const selectedCheckboxes = document.querySelectorAll('.subject-checkbox:checked');
+            const selectedCount = selectedCheckboxes.length;
+            
+            const selectAllBtn = document.getElementById('selectAllBtn');
+            const deselectAllBtn = document.getElementById('deselectAllBtn');
+            const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+            const selectedCountSpan = document.getElementById('selectedCount');
+            
+            if (selectedCount > 0) {
+                selectAllBtn.classList.add('hidden');
+                deselectAllBtn.classList.remove('hidden');
+                deleteSelectedBtn.classList.remove('hidden');
+                selectedCountSpan.textContent = selectedCount;
+            } else {
+                selectAllBtn.classList.remove('hidden');
+                deselectAllBtn.classList.add('hidden');
+                deleteSelectedBtn.classList.add('hidden');
+            }
+        }
+        
+        async function deleteSelectedSubjects() {
+            const selectedCheckboxes = document.querySelectorAll('.subject-checkbox:checked');
+            
+            if (selectedCheckboxes.length === 0) {
+                showAlert('error', 'No subjects selected');
+                return;
+            }
+            
+            const confirmMessage = `Are you sure you want to delete ${selectedCheckboxes.length} subject(s)? This action cannot be undone.`;
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+            
+            try {
+                const idToken = await currentUser.getIdToken();
+                let successCount = 0;
+                let errorCount = 0;
+                
+                showAlert('info', `Deleting ${selectedCheckboxes.length} subjects...`);
+                
+                // Delete each selected subject
+                for (const checkbox of selectedCheckboxes) {
+                    try {
+                        const subjectId = checkbox.dataset.subjectId;
+                        const streamId = checkbox.dataset.streamId;
+                        const semester = parseInt(checkbox.dataset.semester);
+                        
+                        const response = await fetch('/api/teachers/remove-subject', {
+                            method: 'DELETE',
+                            headers: {
+                                'Authorization': `Bearer ${idToken}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                subjectId,
+                                streamId,
+                                semester
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            successCount++;
+                        } else {
+                            errorCount++;
+                        }
+                    } catch (error) {
+                        console.error('Error deleting subject:', error);
+                        errorCount++;
+                    }
+                }
+                
+                // Show result and reload
+                if (successCount > 0) {
+                    showAlert('success', `Successfully deleted ${successCount} subject(s)`);
+                    await loadTeacherProfile(currentUser);
+                }
+                
+                if (errorCount > 0) {
+                    showAlert('error', `Failed to delete ${errorCount} subject(s)`);
+                }
+                
+            } catch (error) {
+                console.error('Error in bulk delete:', error);
+                showAlert('error', 'Failed to delete subjects. Please try again.');
+            }
+        }
+        
         // Utility functions
         function showAlert(type, message) {
             const alertDiv = document.getElementById('alertMessage');
@@ -398,11 +537,17 @@
 </head>
 <body class="min-h-screen bg-light-gray">
     <!-- Header -->
+     
     <header class="bg-white shadow-sm border-b border-gray-100 fixed top-0 left-0 right-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
-                <!-- Left side - Logo and Title -->
+                <!-- Left side - Hamburger Menu and Title -->
                 <div class="flex items-center space-x-3">
+                    <!-- Hamburger Menu -->
+                    <button id="hamburgerBtn" class="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-xl flex items-center justify-center transition-colors">
+                        <i class="fas fa-bars text-gray-600"></i>
+                    </button>
+                    
                     <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
                         <i class="fas fa-chart-line text-white text-lg"></i>
                     </div>
@@ -419,29 +564,48 @@
                         <p id="userEmail" class="text-sm font-medium text-gray-900">Loading...</p>
                     </div>
                     
-                    <!-- Profile Dropdown -->
-                    <div class="relative">
-                        <button id="profileBtn" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-xl flex items-center justify-center text-white font-medium hover:shadow-lg transition-all duration-200">
-                            <i class="fas fa-user"></i>
-                        </button>
-                        
-                        <!-- Dropdown Menu -->
-                        <div id="profileDropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 py-2 z-10">
-                            <div class="px-4 py-2 border-b border-gray-100">
-                                <p id="dropdownUserEmail" class="text-sm text-gray-600 truncate">Loading...</p>
-                            </div>
-                            <div class="border-t border-gray-100 mt-2 pt-2">
-                                <button id="logoutBtn" class="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
-                                    <i class="fas fa-sign-out-alt mr-3"></i>
-                                    Sign Out
-                                </button>
-                            </div>
-                        </div>
+                    <!-- Profile Icon (Square with initials) -->
+                    <div id="profileIcon" class="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                        --
                     </div>
                 </div>
             </div>
         </div>
     </header>
+
+    <!-- Hamburger Menu Sidebar -->
+    <div id="hamburgerMenu" class="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-xl transform -translate-x-full transition-transform duration-300 ease-in-out">
+        <div class="flex flex-col h-full">
+            <!-- Menu Header -->
+            <div class="flex items-center justify-between p-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-900">Menu</h3>
+                <button id="closeMenuBtn" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition-colors">
+                    <i class="fas fa-times text-gray-600"></i>
+                </button>
+            </div>
+            
+            <!-- Menu Items -->
+            <div class="flex-1 p-4">
+                <nav class="space-y-2">
+                    <button id="menuGenerateReportBtn" class="w-full flex items-center px-4 py-3 text-left text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                        <i class="fas fa-chart-bar mr-3 text-green-600"></i>
+                        Generate Report
+                    </button>
+                    <button id="menuWhatsAppBtn" class="w-full flex items-center px-4 py-3 text-left text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                        <i class="fab fa-whatsapp mr-3 text-green-500"></i>
+                        Send Marks via WhatsApp
+                    </button>
+                    <button id="menuLogoutBtn" class="w-full flex items-center px-4 py-3 text-left text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                        <i class="fas fa-sign-out-alt mr-3"></i>
+                        Logout
+                    </button>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay for hamburger menu -->
+    <div id="menuOverlay" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden"></div>
 
     <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
@@ -489,10 +653,21 @@
                     <p class="text-sm text-text-gray">Loaded from database</p>
                 </div>
                 <div class="flex items-center space-x-3">
-                    <button id="generateReportBtn" class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors">
-                        <i class="fas fa-chart-bar mr-2"></i>
-                        Generate Report
-                    </button>
+                    <!-- Select All Controls -->
+                    <div class="flex items-center space-x-2">
+                        <button id="selectAllBtn" class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors">
+                            <i class="fas fa-check-square mr-1"></i>
+                            Select All
+                        </button>
+                        <button id="deselectAllBtn" class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors hidden">
+                            <i class="fas fa-square mr-1"></i>
+                            Deselect All
+                        </button>
+                        <button id="deleteSelectedBtn" class="px-3 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors hidden">
+                            <i class="fas fa-trash mr-1"></i>
+                            Delete Selected (<span id="selectedCount">0</span>)
+                        </button>
+                    </div>
                     <button id="addSubjectBtn" class="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition-colors">
                         <i class="fas fa-plus mr-2"></i>
                         Add More
@@ -502,18 +677,7 @@
             
             <!-- Subjects Grid -->
             <div id="subjectsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {{ ... }}
-                <div class="flex items-center justify-between mb-6">
-                    <div>
-                        <h3 class="text-xl font-semibold text-gray-900">Your Classes</h3>
-                        <p class="text-sm text-text-gray">Loaded from database</p>
-                    </div>
-                    <button onclick="openSubjectDashboard('${subject._id}')" class="w-full bg-primary hover:bg-primary-dark text-white font-medium py-2 px-4 rounded-lg transition-colors">
-                        <i class="fas fa-external-link-alt mr-2"></i>
-                        Open Dashboard
-                    </button>
-                </div>
-                {{ ... }}
+                <!-- Subject cards will be populated here -->
             </div>
         </div>
     </main>

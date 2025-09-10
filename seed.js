@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const Teacher = require('./models/Teacher');
+require('dotenv').config();
 
-// Use your MongoDB Atlas URI here
-const MONGODB_URI = 'mongodb+srv://skanda:umesh@cluster0.71icrb5.mongodb.net/IA?retryWrites=true&w=majority&appName=Cluster0';
+// Use MongoDB URI from environment variables
+const MONGODB_URI = process.env.MONGODB_URI;
 
 async function seedTeachers() {
     try {
